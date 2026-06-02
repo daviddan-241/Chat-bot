@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  color-scheme: dark;
+}
+
+html, body, #__next { height: 100%; }
+body {
+  background: radial-gradient(1200px 800px at 20% -10%, rgba(99,102,241,0.10), transparent 60%),
+              radial-gradient(900px 700px at 110% 10%, rgba(56,189,248,0.06), transparent 60%),
+              #0a0d14;
+  color: #e6e9f2;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+/* Glass panel utility */
+.glass {
+  background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.012));
+  border: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+}
+
+.glass-soft {
+  background: rgba(18, 24, 38, 0.6);
+  border: 1px solid rgba(255,255,255,0.05);
+  backdrop-filter: blur(8px);
+}
+
+.hairline { border-color: rgba(255,255,255,0.06); }
+.hairline-strong { border-color: rgba(255,255,255,0.12); }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.10) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20); border: 2px solid transparent; background-clip: padding-box; }
+
+/* Markdown */
+.prose-chat { color: #e6e9f2; line-height: 1.65; font-size: 15px; }
+.prose-chat p { margin: 0.5rem 0; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 1.1rem 0 0.5rem; letter-spacing: -0.01em; }
+.prose-chat h1 { font-size: 1.4rem; }
+.prose-chat h2 { font-size: 1.2rem; }
+.prose-chat h3 { font-size: 1.05rem; }
+.prose-chat ul, .prose-chat ol { padding-left: 1.25rem; margin: 0.5rem 0; }
+.prose-chat ul { list-style: disc; }
+.prose-chat ol { list-style: decimal; }
+.prose-chat a { color: #a5b4fc; text-decoration: underline; text-underline-offset: 2px; }
+.prose-chat code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 5px; }
+.prose-chat pre { background: #0c1220; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 12px 14px; overflow-x: auto; margin: 0.6rem 0; }
+.prose-chat pre code { background: transparent; border: none; padding: 0; font-size: 0.85em; }
+.prose-chat blockquote { border-left: 3px solid rgba(99,102,241,0.5); padding-left: 0.8rem; color: #c7cdd9; margin: 0.6rem 0; }
+.prose-chat table { width: 100%; border-collapse: collapse; margin: 0.6rem 0; font-size: 0.9em; }
+.prose-chat th, .prose-chat td { border: 1px solid rgba(255,255,255,0.08); padding: 6px 10px; }
+.prose-chat th { background: rgba(255,255,255,0.04); text-align: left; }
+.prose-chat hr { border-color: rgba(255,255,255,0.08); margin: 1rem 0; }
+
+/* Highlight.js dark tweaks (we lazy-import the stylesheet content inline) */
+.hljs { color: #d6def0; background: transparent; }
+.hljs-comment, .hljs-quote { color: #6b7591; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal { color: #c4b5fd; }
+.hljs-string, .hljs-doctag { color: #86efac; }
+.hljs-number, .hljs-built_in { color: #fda4af; }
+.hljs-title, .hljs-section, .hljs-name { color: #93c5fd; }
+.hljs-attr, .hljs-attribute, .hljs-variable { color: #fcd34d; }
+.hljs-tag { color: #f0abfc; }
+.hljs-meta { color: #94a3b8; }
+
+/* Streaming caret */
+.stream-caret::after {
+  content: "▋";
+  display: inline-block;
+  margin-left: 2px;
+  color: #818cf8;
+  animation: pulse_glow 1s ease-in-out infinite;
+  transform: translateY(-1px);
+}
+
+/* Hide focus ring noise */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid rgba(129,140,248,0.6); outline-offset: 2px; border-radius: 6px; }
+
+/* iOS safe areas */
+.safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 12px); }
+.safe-top { padding-top: max(env(safe-area-inset-top), 0px); }
