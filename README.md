@@ -10,6 +10,21 @@ A production AI workspace platform: streaming chat, live artifacts, projects + f
 
 ## ✨ Features
 
+### Agents (19 built-in + custom)
+- **Nova · Claude · GPT-4o · Gemini** — direct provider routing per agent
+- **Specialists**: Code Sage · Code Reviewer · Debugger · Architect · DevOps · SQL Expert · Data Analyst · UI Designer · Writer · Researcher · QA Tester · Translator · Explain-Like-I'm-Five · Product Manager · Security Auditor
+- Each agent ships with its own **system prompt, model, temperature, capabilities, and example prompts**
+- **AgentPicker** in the chat header — switch mid-conversation, persisted to the chat
+- Avatars + provider badges; warning chip when an agent's provider has no API key
+- `/agents` gallery: search, filter (All / Built-in / Mine), one-click "Start chat"
+- Build your own via `POST /agents` — same fields, scoped to your user
+
+### Multi-provider AI
+- **OpenAI** (GPT-4o, etc.) · **Anthropic** (Claude Sonnet 4.5) · **Google Gemini** · **Mock**
+- Native SSE for each provider (Anthropic Messages API, Gemini `streamGenerateContent`, OpenAI Chat Completions)
+- `provider="auto"` picks the first configured one
+- Per-message override: `{ "agent_id": "...", "provider": "anthropic", "model": "..." }`
+
 ### Chat
 - **Real-time SSE streaming** with token-by-token caret
 - Optimistic user messages, server-canonical reconciliation
@@ -74,11 +89,14 @@ A production AI workspace platform: streaming chat, live artifacts, projects + f
 - Keyboard shortcuts: ⌘K, ⌘⇧P (artifacts), ⌘B (sidebar), ⌘J (chat), ⌘/ (logs), ⌘,
 - Consistent spacing/typography tokens via Tailwind theme
 
-### 📱 Mobile / iOS
-- Three swipeable views (Menu / Chat / Artifact) with iOS bottom nav
-- **Swipe-to-navigate** (touch gestures between views)
-- `100dvh`, safe-area insets, optimized tap targets
-- Badge dot on the Artifact tab when fresh output arrives
+### 📱 Mobile / iOS (real PWA)
+- **Installable PWA** with manifest, 192/512 maskable icons, Apple touch icon
+- **Service worker** with network-first nav + cache-first static assets (never caches SSE/auth)
+- `apple-mobile-web-app-capable` + black-translucent status bar
+- **5-slot bottom navigation** (Menu · Chat · Agents · Files · Artifact) with active-tab indicator + haptic feedback (`navigator.vibrate`)
+- **Swipe-to-navigate** between views (touch gestures)
+- `100dvh`, safe-area insets, no overscroll bounce, no tap-highlight flash
+- Tap-targets sized for thumbs; active-press scale animation
 
 ---
 
@@ -139,30 +157,36 @@ npm run dev                       # :3000
 Add these to `backend/.env`:
 
 ```env
-# GitHub OAuth (https://github.com/settings/developers)
+# --- AI providers (set any/all; the UI shows which are live) ---
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-2.0-flash
+
+# Default agent provider routing: 'auto' picks the first configured one above
+AI_PROVIDER=auto
+
+# --- GitHub OAuth (https://github.com/settings/developers) ---
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
 GITHUB_REDIRECT_URI=http://localhost:8000/integrations/github/callback
 
-# Google OAuth (https://console.cloud.google.com/apis/credentials)
+# --- Google OAuth (https://console.cloud.google.com/apis/credentials) ---
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=http://localhost:8000/oauth/google/callback
 
-# Vercel API token (https://vercel.com/account/tokens)
-VERCEL_API_TOKEN=...
-VERCEL_TEAM_ID=               # optional
-
-# Railway (https://railway.app/account/tokens)
-RAILWAY_API_TOKEN=...
-
-# Real AI provider (otherwise mock)
-AI_PROVIDER=openai
-AI_API_KEY=sk-...
-AI_MODEL=gpt-4o-mini
+# --- Deployments ---
+VERCEL_API_TOKEN=...           # https://vercel.com/account/tokens
+VERCEL_TEAM_ID=                # optional
+RAILWAY_API_TOKEN=...          # https://railway.app/account/tokens
 ```
 
-Restart the backend. The Settings → Integrations / Deployments pages will light up.
+Restart the backend. The Settings → Integrations / Deployments pages and the `/agents` gallery will light up.
 
 ---
 

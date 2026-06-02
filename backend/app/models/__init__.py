@@ -8,3 +8,4 @@ from app.models.tool import ToolExecutionLog, ToolStatus  # noqa: F401
 from app.models.integration import Integration, IntegrationProvider, RepoImport  # noqa: F401
 from app.models.deployment import Deployment, DeploymentProvider, DeploymentStatus, EnvVar  # noqa: F401
 from app.models.preferences import UserPreferences, ProjectMemory, MemoryEmbedding  # noqa: F401
+from app.models.agent import Agent  # noqa: F401

@@ -12,6 +12,7 @@ class ChatCreate(BaseModel):
     title: str = "New Chat"
     model: str | None = None
     system_prompt: str | None = None
+    agent_id: UUID | None = None
     metadata: dict = Field(default_factory=dict)
 
 
@@ -19,6 +20,7 @@ class ChatUpdate(BaseModel):
     title: str | None = None
     model: str | None = None
     system_prompt: str | None = None
+    agent_id: UUID | None = None
     metadata: dict | None = None
 
 
@@ -31,6 +33,7 @@ class ChatOut(BaseModel):
     title: str
     model: str | None
     system_prompt: str | None
+    agent_id: UUID | None
     chat_metadata: dict = Field(serialization_alias="metadata")
     created_at: datetime
     updated_at: datetime
@@ -61,5 +64,8 @@ class StreamRequest(BaseModel):
     content: str
     model: str | None = None
     system_prompt: str | None = None
+    agent_id: UUID | None = None
+    provider: str | None = None  # 'openai'|'anthropic'|'gemini'|'mock'|'auto'
+    temperature: float | None = None
     include_memory: bool = True
     metadata: dict = Field(default_factory=dict)

@@ -12,6 +12,9 @@ export interface StreamOptions {
   content: string;
   model?: string;
   systemPrompt?: string;
+  agentId?: string | null;
+  provider?: string | null;
+  temperature?: number | null;
   signal?: AbortSignal;
   onEvent: (e: StreamEvent) => void;
 }
@@ -32,6 +35,9 @@ export async function streamChat(opts: StreamOptions): Promise<void> {
       content: opts.content,
       model: opts.model,
       system_prompt: opts.systemPrompt,
+      agent_id: opts.agentId ?? undefined,
+      provider: opts.provider ?? undefined,
+      temperature: opts.temperature ?? undefined,
     }),
     signal: opts.signal,
   });

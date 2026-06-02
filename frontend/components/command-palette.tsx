@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Search, MessageSquarePlus, Plus, Settings, FileCode2, Folder, MessageSquare, FileText,
-  Github, Rocket, Brain, LogOut, ArrowRight, Workflow, Sparkles, Command,
+  Github, Rocket, Brain, LogOut, ArrowRight, Workflow, Sparkles, Command, Bot,
 } from "lucide-react";
 import { useCommandStore } from "@/stores/command-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -62,6 +62,7 @@ export function CommandPalette() {
     const list: CommandItem[] = [
       // Navigate
       { id: "nav-chat", group: "navigate", label: "Go to Chat", icon: <MessageSquare size={14} />, run: () => router.push("/chat") },
+      { id: "nav-agents", group: "navigate", label: "Go to Agents", icon: <Bot size={14} />, run: () => router.push("/agents") },
       { id: "nav-files", group: "navigate", label: "Go to Files", icon: <FileText size={14} />, run: () => router.push("/files") },
       { id: "nav-artifacts", group: "navigate", label: "Go to Artifacts", icon: <FileCode2 size={14} />, run: () => router.push("/artifacts") },
       { id: "nav-deployments", group: "navigate", label: "Go to Deployments", icon: <Rocket size={14} />, run: () => router.push("/settings/deployments") },

@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Menu, MoreHorizontal, Trash2, Pencil, MessageSquarePlus } from "lucide-react";
+import { ChevronLeft, Menu, MoreHorizontal, Trash2, Pencil, MessageSquarePlus, Bot } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,16 +11,18 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChatMessage } from "./chat-message";
 import { ChatComposer } from "./chat-composer";
-import { chatsApi, artifactsApi } from "@/lib/api";
+import { AgentPicker, AgentAvatar } from "./agent-picker";
+import { agentsApi, chatsApi, artifactsApi } from "@/lib/api";
 import { streamChat } from "@/lib/stream";
 import { useAuthStore } from "@/stores/auth-store";
 import { useArtifactStore } from "@/stores/artifact-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useLogStore } from "@/stores/log-store";
+import { useAgentStore } from "@/stores/agent-store";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
-import type { ChatMessage as ChatMessageT } from "@/lib/types";
+import type { Agent, ChatMessage as ChatMessageT } from "@/lib/types";
 
 export function ChatView({ chatId }: { chatId: string }) {
   const qc = useQueryClient();
@@ -29,6 +31,7 @@ export function ChatView({ chatId }: { chatId: string }) {
   const isMobile = useIsMobile();
   const { setMobileView } = useUIStore();
   const { setActive, setDraft } = useArtifactStore();
+  const { selectedAgentId, setSelectedAgentId } = useAgentStore();
   const { push } = useToast();
   const pushLog = useLogStore((s) => s.push);
 
@@ -38,6 +41,11 @@ export function ChatView({ chatId }: { chatId: string }) {
     queryFn: () => chatsApi.messages(chatId),
     enabled: !!chatId,
   });
+  const { data: agents } = useQuery({ queryKey: ["agents"], queryFn: agentsApi.list });
+
+  // Effective agent: chat's saved agent > store selection > default
+  const effectiveAgentId = chat?.agent_id || selectedAgentId || agents?.find((a) => a.is_default)?.id || null;
+  const effectiveAgent = agents?.find((a) => a.id === effectiveAgentId) || null;
 
   const [streaming, setStreaming] = React.useState(false);
   const [streamMsg, setStreamMsg] = React.useState<ChatMessageT | null>(null);
@@ -45,7 +53,6 @@ export function ChatView({ chatId }: { chatId: string }) {
   const scrollerRef = React.useRef<HTMLDivElement>(null);
   const [autoStick, setAutoStick] = React.useState(true);
 
-  // Auto-scroll while streaming
   const stickBottom = React.useCallback(() => {
     if (!autoStick) return;
     const el = scrollerRef.current;
@@ -63,44 +70,46 @@ export function ChatView({ chatId }: { chatId: string }) {
     setAutoStick(atBottom);
   }
 
+  // Persist agent on the chat
+  const setChatAgent = useMutation({
+    mutationFn: (agent_id: string | null) => chatsApi.update(chatId, { agent_id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["chat", chatId] }),
+  });
+
+  function chooseAgent(agent: Agent) {
+    setSelectedAgentId(agent.id);
+    if (chat) setChatAgent.mutate(agent.id);
+  }
+
   async function send(content: string) {
     if (!chat) return;
     setStreaming(true);
     setAutoStick(true);
 
-    // Optimistic user message
     const optimisticUser: ChatMessageT = {
       id: `local-user-${Date.now()}`,
-      chat_id: chatId,
-      role: "user",
-      content,
-      metadata: {},
-      artifact_id: null,
-      parent_id: null,
-      created_at: new Date().toISOString(),
+      chat_id: chatId, role: "user", content, metadata: {},
+      artifact_id: null, parent_id: null, created_at: new Date().toISOString(),
     };
     qc.setQueryData<ChatMessageT[]>(["messages", chatId], (old = []) => [...old, optimisticUser]);
 
     const streamingAssistant: ChatMessageT = {
       id: `local-assistant-${Date.now()}`,
-      chat_id: chatId,
-      role: "assistant",
-      content: "",
-      metadata: {},
-      artifact_id: null,
-      parent_id: null,
-      created_at: new Date().toISOString(),
+      chat_id: chatId, role: "assistant", content: "",
+      metadata: { agent_slug: effectiveAgent?.slug, agent_id: effectiveAgent?.id },
+      artifact_id: null, parent_id: null, created_at: new Date().toISOString(),
     };
     setStreamMsg(streamingAssistant);
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    pushLog("stream", `→ ${content.slice(0, 80)}`);
+    pushLog("stream", `[${effectiveAgent?.name || "default"}] → ${content.slice(0, 80)}`);
 
     try {
       await streamChat({
         chatId,
         content,
+        agentId: effectiveAgentId || undefined,
         signal: ctrl.signal,
         onEvent: (e) => {
           if (e.type === "token") {
@@ -111,7 +120,6 @@ export function ChatView({ chatId }: { chatId: string }) {
             if (isMobile) setMobileView("artifact");
           } else if (e.type === "done") {
             pushLog("success", `← done (${e.content.length} chars)`);
-            // Replace optimistic IDs with real
             qc.setQueryData<ChatMessageT[]>(["messages", chatId], (old = []) =>
               old.map((m) =>
                 m.id === optimisticUser.id
@@ -119,10 +127,8 @@ export function ChatView({ chatId }: { chatId: string }) {
                   : m,
               ),
             );
-            // Refresh real messages from server (canonical state)
             qc.invalidateQueries({ queryKey: ["messages", chatId] });
             qc.invalidateQueries({ queryKey: ["chats", chat.workspace_id] });
-            // If artifact persisted, fetch it & set active
             if (e.artifact_id) {
               artifactsApi.get(e.artifact_id).then((a) => setActive(a)).catch(() => undefined);
               qc.invalidateQueries({ queryKey: ["artifacts", chat.workspace_id] });
@@ -147,16 +153,13 @@ export function ChatView({ chatId }: { chatId: string }) {
     }
   }
 
-  function stop() {
-    abortRef.current?.abort();
-  }
+  function stop() { abortRef.current?.abort(); }
 
   function regenerate() {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (lastUser) send(lastUser.content);
   }
 
-  // Title editing & deletion
   const [titleEdit, setTitleEdit] = React.useState(false);
   const [titleDraft, setTitleDraft] = React.useState("");
   React.useEffect(() => { if (chat) setTitleDraft(chat.title); }, [chat]);
@@ -180,8 +183,7 @@ export function ChatView({ chatId }: { chatId: string }) {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      {/* Header */}
-      <header className="shrink-0 px-4 md:px-6 py-2.5 border-b hairline flex items-center gap-2">
+      <header className="shrink-0 px-3 md:px-6 py-2 md:py-2.5 border-b hairline flex items-center gap-2 safe-top">
         {isMobile && (
           <Button variant="ghost" size="icon-sm" onClick={() => setMobileView("sidebar")}>
             <Menu size={16} />
@@ -199,16 +201,19 @@ export function ChatView({ chatId }: { chatId: string }) {
         ) : (
           <button
             onClick={() => setTitleEdit(true)}
-            className="text-sm font-medium text-ink hover:text-ink-muted transition truncate text-left"
+            className="text-sm font-medium text-ink hover:text-ink-muted transition truncate text-left min-w-0"
             title="Click to rename"
           >
             {chat?.title || "Chat"}
           </button>
         )}
         <div className="flex-1" />
-        <Button variant="ghost" size="icon-sm" onClick={() => router.push("/chat")} title="New chat">
-          <MessageSquarePlus size={15} />
-        </Button>
+        <AgentPicker selectedAgentId={effectiveAgentId} onSelect={chooseAgent} compact={isMobile} />
+        {!isMobile && (
+          <Button variant="ghost" size="icon-sm" onClick={() => router.push("/chat")} title="New chat">
+            <MessageSquarePlus size={15} />
+          </Button>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon-sm"><MoreHorizontal size={15} /></Button>
@@ -222,7 +227,6 @@ export function ChatView({ chatId }: { chatId: string }) {
         </DropdownMenu>
       </header>
 
-      {/* Messages */}
       <div ref={scrollerRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto py-4 md:py-6 space-y-5">
         {isLoading && (
           <div className="h-full grid place-items-center text-ink-faint text-xs">
@@ -230,36 +234,42 @@ export function ChatView({ chatId }: { chatId: string }) {
           </div>
         )}
         {!isLoading && messages.length === 0 && !streamMsg && (
-          <EmptyState onSuggest={(s) => send(s)} />
+          <EmptyState onSuggest={(s) => send(s)} agent={effectiveAgent} />
         )}
         {messages.map((m) => (
-          <ChatMessage key={m.id} message={m} user={user} onRegenerate={m.role === "assistant" ? regenerate : undefined} />
+          <ChatMessage
+            key={m.id}
+            message={m}
+            user={user}
+            agents={agents}
+            onRegenerate={m.role === "assistant" ? regenerate : undefined}
+          />
         ))}
         {streamMsg && (
-          <ChatMessage message={streamMsg} user={user} streaming />
+          <ChatMessage message={streamMsg} user={user} agents={agents} streaming />
         )}
       </div>
 
-      {/* Composer */}
       <div className="shrink-0">
         <ChatComposer
           onSend={(t) => send(t)}
           onStop={stop}
           streaming={streaming}
-          placeholder={chat ? `Message in "${chat.title}"...` : "Loading..."}
+          placeholder={effectiveAgent ? `Ask ${effectiveAgent.name}...` : (chat ? `Message in "${chat.title}"...` : "Loading...")}
         />
       </div>
     </div>
   );
 }
 
-function EmptyState({ onSuggest }: { onSuggest: (s: string) => void }) {
-  const suggestions = [
+function EmptyState({ onSuggest, agent }: { onSuggest: (s: string) => void; agent: Agent | null }) {
+  const fallback = [
     "Write a React component for a pricing card with three tiers",
-    "Explain how vector databases work, with a diagram in code",
+    "Explain how vector databases work, with a small diagram",
     "Generate a JSON config for a Vite + TypeScript project",
     "Draft a markdown spec for a notes app feature",
   ];
+  const suggestions = (agent?.examples?.length ? agent.examples : fallback).slice(0, 4);
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -268,23 +278,27 @@ function EmptyState({ onSuggest }: { onSuggest: (s: string) => void }) {
       className="h-full grid place-items-center px-6"
     >
       <div className="max-w-xl w-full text-center">
-        <div className="inline-flex h-12 w-12 rounded-2xl bg-gradient-to-br from-accent to-fuchsia-500 items-center justify-center shadow-xl mb-4">
-          <motion.div
-            animate={{ rotate: [0, 8, -6, 0] }}
-            transition={{ duration: 4, repeat: Infinity }}
-            className="text-white text-xl"
-          >✦</motion.div>
-        </div>
-        <h2 className="text-xl font-semibold tracking-tight">What can I help you build today?</h2>
+        {agent ? (
+          <div className="inline-block mb-4">
+            <AgentAvatar agent={agent} size={56} />
+          </div>
+        ) : (
+          <div className="inline-flex h-12 w-12 rounded-2xl bg-gradient-to-br from-accent to-fuchsia-500 items-center justify-center shadow-xl mb-4">
+            <motion.div animate={{ rotate: [0, 8, -6, 0] }} transition={{ duration: 4, repeat: Infinity }} className="text-white text-xl">✦</motion.div>
+          </div>
+        )}
+        <h2 className="text-xl font-semibold tracking-tight">
+          {agent ? `Chat with ${agent.name}` : "What can I help you build today?"}
+        </h2>
         <p className="text-sm text-ink-muted mt-1">
-          Ask anything. Generated code, markdown, JSON and HTML automatically open in the artifact panel.
+          {agent?.description || "Ask anything. Generated code, markdown, JSON and HTML auto-open in the artifact panel."}
         </p>
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
           {suggestions.map((s) => (
             <button
               key={s}
               onClick={() => onSuggest(s)}
-              className="glass-soft text-left text-xs text-ink-muted hover:text-ink hover:bg-white/[0.05] rounded-xl p-3 transition"
+              className="glass-soft text-left text-xs text-ink-muted hover:text-ink hover:bg-white/[0.05] rounded-xl p-3 transition active:scale-[0.98]"
             >
               {s}
             </button>

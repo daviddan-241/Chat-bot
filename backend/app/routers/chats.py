@@ -24,6 +24,7 @@ async def create_chat(payload: ChatCreate, user: User = Depends(get_current_user
         title=payload.title,
         model=payload.model,
         system_prompt=payload.system_prompt,
+        agent_id=payload.agent_id,
         chat_metadata=payload.metadata,
     )
     db.add(chat)

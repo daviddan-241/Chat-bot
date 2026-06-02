@@ -60,6 +60,7 @@ export interface Chat {
   title: string;
   model: string | null;
   system_prompt: string | null;
+  agent_id: UUID | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -252,9 +253,38 @@ export interface SemanticHit {
   score: number;
 }
 
+export interface Agent {
+  id: UUID;
+  slug: string;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  provider: string;
+  model: string | null;
+  system_prompt: string;
+  temperature: number;
+  tools: unknown[];
+  capabilities: string[];
+  examples: string[];
+  is_default: boolean;
+  is_builtin: boolean;
+  is_public: boolean;
+  user_id: UUID | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProviderStatus {
+  name: string;
+  configured: boolean;
+  default_model: string | null;
+}
+
 /* SSE stream events */
 export type StreamEvent =
-  | { type: "start"; chat_id: string; user_message_id: string }
+  | { type: "start"; chat_id: string; user_message_id: string; agent_id?: string | null; agent_slug?: string | null; provider?: string; model?: string | null }
   | { type: "token"; delta: string }
   | { type: "artifact"; artifact: { type: ArtifactType; language: string | null; content: string; title?: string } }
   | { type: "done"; assistant_message_id: string; artifact_id: string | null; content: string; usage: Record<string, unknown> }

@@ -1,0 +1,20 @@
+{
+  "name": "Nova — AI Workspace",
+  "short_name": "Nova",
+  "description": "Streaming AI chat, artifacts, projects, files, and 19+ agents.",
+  "start_url": "/chat",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0d14",
+  "theme_color": "#0a0d14",
+  "categories": ["productivity", "developer", "utilities"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "New chat", "url": "/chat" },
+    { "name": "Agents", "url": "/agents" },
+    { "name": "Artifacts", "url": "/artifacts" }
+  ]
+}

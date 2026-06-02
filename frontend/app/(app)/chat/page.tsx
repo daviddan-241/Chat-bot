@@ -26,7 +26,15 @@ export default function ChatLanding() {
   });
 
   const createChat = useMutation({
-    mutationFn: () => chatsApi.create({ workspace_id: current!.id, title: "New chat" }),
+    mutationFn: async () => {
+      const agents = await import("@/lib/api").then((m) => m.agentsApi.list());
+      const def = agents.find((a) => a.is_default) || agents[0];
+      return chatsApi.create({
+        workspace_id: current!.id,
+        title: "New chat",
+        agent_id: def?.id,
+      });
+    },
     onSuccess: (chat) => router.replace(`/chat/${chat.id}`),
     onError: (e) => push({ kind: "error", message: (e as Error).message }),
   });

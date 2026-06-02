@@ -28,11 +28,25 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # AI
-    AI_PROVIDER: str = "mock"  # 'mock' or 'openai'
+    # AI (legacy single-provider; still honored)
+    AI_PROVIDER: str = "auto"  # 'auto' | 'openai' | 'anthropic' | 'gemini' | 'mock'
     AI_API_KEY: str = ""
     AI_BASE_URL: str = "https://api.openai.com/v1"
     AI_MODEL: str = "gpt-4o-mini"
+
+    # OpenAI (and OpenAI-compatible)
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+
+    # Anthropic
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-5-20250929"
+    ANTHROPIC_MAX_TOKENS: int = 4096
+
+    # Google Gemini
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.0-flash"
 
     # CORS
     CORS_ORIGINS: str = "*"

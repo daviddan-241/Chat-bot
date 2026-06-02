@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.redis_client import close_redis, get_redis
 from app.routers import (
-    ai, artifacts, auth, chats, deployments, health, integrations, memory,
+    agents, ai, artifacts, auth, chats, deployments, health, integrations, memory,
     oauth_google, preferences, projects, tools, workspaces,
 )
 
@@ -17,6 +17,14 @@ async def lifespan(app: FastAPI):
     try:
         r = await get_redis()
         await r.ping()
+    except Exception:
+        pass
+    # Seed built-in agents (idempotent)
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.services.agent_service import seed_builtin_agents
+        async with AsyncSessionLocal() as db:
+            await seed_builtin_agents(db)
     except Exception:
         pass
     yield
@@ -51,6 +59,7 @@ app.include_router(integrations.router)
 app.include_router(oauth_google.router)
 app.include_router(deployments.router)
 app.include_router(preferences.router)
+app.include_router(agents.router)
 
 
 @app.get("/")

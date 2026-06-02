@@ -10,16 +10,20 @@ import { chatsApi, artifactsApi } from "@/lib/api";
 import { useArtifactStore } from "@/stores/artifact-store";
 import { useToast } from "@/components/ui/toast";
 import { cn, initials } from "@/lib/utils";
-import type { ChatMessage as ChatMessageT, User } from "@/lib/types";
+import { AgentAvatar } from "./agent-picker";
+import type { Agent, ChatMessage as ChatMessageT, User } from "@/lib/types";
 
 interface Props {
   message: ChatMessageT;
   user: User | null;
+  agents?: Agent[];
   streaming?: boolean;
   onRegenerate?: () => void;
 }
 
-export function ChatMessage({ message, user, streaming, onRegenerate }: Props) {
+export function ChatMessage({ message, user, agents, streaming, onRegenerate }: Props) {
+  const meta = (message.metadata || {}) as { agent_slug?: string; agent_id?: string; provider?: string };
+  const agent = agents?.find((a) => a.id === meta.agent_id) || agents?.find((a) => a.slug === meta.agent_slug) || null;
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const { setActive } = useArtifactStore();
@@ -96,12 +100,21 @@ export function ChatMessage({ message, user, streaming, onRegenerate }: Props) {
       className={cn("group flex gap-3 px-4 md:px-6", isUser ? "justify-end" : "justify-start")}
     >
       {!isUser && (
-        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-accent to-fuchsia-500 grid place-items-center shrink-0 shadow-md">
-          <Sparkles size={14} className="text-white" />
-        </div>
+        agent ? (
+          <AgentAvatar agent={agent} size={32} />
+        ) : (
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-accent to-fuchsia-500 grid place-items-center shrink-0 shadow-md">
+            <Sparkles size={14} className="text-white" />
+          </div>
+        )
       )}
 
       <div className={cn("min-w-0 max-w-[88%] md:max-w-[78%] flex flex-col gap-1", isUser && "items-end")}>
+        {!isUser && agent && (
+          <div className="text-[10px] text-ink-faint px-1">
+            {agent.name}{meta.provider && meta.provider !== "auto" ? ` · ${meta.provider}` : ""}
+          </div>
+        )}
         <div className={cn(
           "rounded-2xl px-4 py-3 border",
           isUser

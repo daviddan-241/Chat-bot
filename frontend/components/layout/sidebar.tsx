@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   MessageSquarePlus, MessageSquare, Folder, FileText, Settings, Sparkles, ChevronsLeft,
   ChevronsRight, LogOut, Plus, FolderPlus, Search, User as UserIcon, ChevronDown, X,
-  Workflow, Rocket, Brain, Command,
+  Workflow, Rocket, Brain, Command, Bot,
 } from "lucide-react";
 import { useCommandStore } from "@/stores/command-store";
 import { motion, AnimatePresence } from "framer-motion";
@@ -222,6 +222,7 @@ export function Sidebar({ mobile = false }: { mobile?: boolean }) {
         {/* Other links */}
         <SectionHeader collapsed={collapsed} label="Workspace" />
         <div className="space-y-0.5">
+          <NavItem href="/agents" icon={<Bot size={14} />} label="Agents" collapsed={collapsed} active={pathname.startsWith("/agents")} onClick={() => mobile && setMobileView("chat")} />
           <NavItem href="/files" icon={<FileText size={14} />} label="Files" collapsed={collapsed} active={pathname === "/files"} onClick={() => mobile && setMobileView("chat")} />
           <NavItem href="/artifacts" icon={<Sparkles size={14} />} label="Artifacts" collapsed={collapsed} active={pathname === "/artifacts"} onClick={() => mobile && setMobileView("chat")} />
         </div>

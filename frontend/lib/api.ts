@@ -4,6 +4,7 @@
  * attached as a Bearer header. 401s automatically attempt a refresh once.
  */
 import type {
+  Agent,
   Artifact,
   ArtifactType,
   ArtifactVersion,
@@ -21,6 +22,7 @@ import type {
   Project,
   ProjectFile,
   ProjectMemoryItem,
+  ProviderStatus,
   RepoImport,
   SemanticHit,
   TokenPair,
@@ -184,9 +186,10 @@ export const chatsApi = {
     title?: string;
     model?: string;
     system_prompt?: string;
+    agent_id?: string | null;
   }) => rawRequest<Chat>("/chats", { method: "POST", body: JSON.stringify(payload) }),
   get: (id: string) => rawRequest<Chat>(`/chats/${id}`),
-  update: (id: string, payload: Partial<Pick<Chat, "title" | "model" | "system_prompt">>) =>
+  update: (id: string, payload: Partial<Pick<Chat, "title" | "model" | "system_prompt" | "agent_id">>) =>
     rawRequest<Chat>(`/chats/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   delete: (id: string) => rawRequest<void>(`/chats/${id}`, { method: "DELETE" }),
   messages: (id: string) => rawRequest<ChatMessage[]>(`/chats/${id}/messages`),
@@ -220,7 +223,18 @@ export const artifactsApi = {
   version: (id: string, v: number) => rawRequest<ArtifactVersion>(`/artifacts/${id}/versions/${v}`),
 };
 
-/* -------- Tools -------- */
+/* -------- Agents -------- */
+export const agentsApi = {
+  list: () => rawRequest<Agent[]>("/agents"),
+  providers: () => rawRequest<ProviderStatus[]>("/agents/providers"),
+  get: (id: string) => rawRequest<Agent>(`/agents/${id}`),
+  create: (payload: Partial<Agent> & { slug: string; name: string }) =>
+    rawRequest<Agent>("/agents", { method: "POST", body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<Agent>) =>
+    rawRequest<Agent>(`/agents/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  delete: (id: string) => rawRequest<void>(`/agents/${id}`, { method: "DELETE" }),
+};
+
 /* -------- Integrations / GitHub -------- */
 export const integrationsApi = {
   list: () => rawRequest<Integration[]>("/integrations"),
