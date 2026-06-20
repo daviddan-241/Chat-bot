@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
+    <title>NexusAI — Unified AI Platform</title>
+    <meta name="description" content="NexusAI — AI Chat, Image Generation, Terminal, Files, Agents and more. 100% free." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="NexusAI — Unified AI Platform" />
+    <meta property="og:description" content="AI Chat, Image Gen, Terminal, Agents — all free, no API key needed." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NexusAI — Unified AI Platform" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap" rel="stylesheet">
+    <style>
+      /* Prevent iOS input zoom — font-size must be >= 16px on all inputs */
+      input, textarea, select { font-size: 16px !important; }
+      /* Prevent elastic bounce on iOS body */
+      html { height: 100%; overflow: hidden; }
+      body { height: 100%; overflow: hidden; position: fixed; width: 100%; }
+      #root { height: 100%; overflow: hidden; }
+      /* Smooth momentum scrolling for scrollable containers */
+      * { -webkit-overflow-scrolling: touch; }
+      /* Prevent callout on long press */
+      * { -webkit-touch-callout: none; }
+      /* Prevent text selection on UI elements */
+      button, a { -webkit-user-select: none; user-select: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

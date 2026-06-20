@@ -1,0 +1,757 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: NexusAI — Unified AI Platform API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: chat
+    description: AI chat conversations and messages
+  - name: images
+    description: AI image generation and editing
+  - name: files
+    description: File uploads and management
+  - name: videos
+    description: Video processing operations
+  - name: settings
+    description: User settings and AI provider config
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /chat/conversations:
+    get:
+      operationId: listConversations
+      tags: [chat]
+      summary: List all conversations
+      responses:
+        "200":
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+    post:
+      operationId: createConversation
+      tags: [chat]
+      summary: Create a new conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationInput"
+      responses:
+        "201":
+          description: Created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+
+  /chat/conversations/{id}:
+    get:
+      operationId: getConversation
+      tags: [chat]
+      summary: Get conversation with messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation with messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationWithMessages"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    patch:
+      operationId: updateConversation
+      tags: [chat]
+      summary: Update conversation title
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationUpdate"
+      responses:
+        "200":
+          description: Updated conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+    delete:
+      operationId: deleteConversation
+      tags: [chat]
+      summary: Delete a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /chat/conversations/{id}/messages:
+    get:
+      operationId: listMessages
+      tags: [chat]
+      summary: List messages in a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+    post:
+      operationId: sendMessage
+      tags: [chat]
+      summary: Send a message (streaming SSE response)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageInput"
+      responses:
+        "200":
+          description: SSE stream of assistant text chunks
+          content:
+            text/event-stream: {}
+
+  /chat/stats:
+    get:
+      operationId: getChatStats
+      tags: [chat]
+      summary: Get chat usage stats
+      responses:
+        "200":
+          description: Chat stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatStats"
+
+  /images/generate:
+    post:
+      operationId: generateImage
+      tags: [images]
+      summary: Generate an image from a text prompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageGenerateInput"
+      responses:
+        "200":
+          description: Generated image info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratedImage"
+
+  /images/edit:
+    post:
+      operationId: editImage
+      tags: [images]
+      summary: Edit an uploaded image with AI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageEditInput"
+      responses:
+        "200":
+          description: Edited image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratedImage"
+
+  /images/gallery:
+    get:
+      operationId: listImageGallery
+      tags: [images]
+      summary: List generated images
+      responses:
+        "200":
+          description: Gallery of generated images
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GeneratedImage"
+
+  /files:
+    get:
+      operationId: listFiles
+      tags: [files]
+      summary: List uploaded files
+      responses:
+        "200":
+          description: List of files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UploadedFile"
+    post:
+      operationId: uploadFile
+      tags: [files]
+      summary: Upload a file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadInput"
+      responses:
+        "201":
+          description: Uploaded file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadedFile"
+
+  /files/{id}:
+    get:
+      operationId: getFile
+      tags: [files]
+      summary: Get file metadata
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: File metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadedFile"
+    delete:
+      operationId: deleteFile
+      tags: [files]
+      summary: Delete a file
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /videos/process:
+    post:
+      operationId: processVideo
+      tags: [videos]
+      summary: Process a video (trim, filter, add captions)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VideoProcessInput"
+      responses:
+        "200":
+          description: Processing job created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJob"
+
+  /videos/jobs:
+    get:
+      operationId: listVideoJobs
+      tags: [videos]
+      summary: List video processing jobs
+      responses:
+        "200":
+          description: List of video jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VideoJob"
+
+  /videos/jobs/{id}:
+    get:
+      operationId: getVideoJob
+      tags: [videos]
+      summary: Get video job status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Video job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJob"
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get current settings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+  /settings/models:
+    get:
+      operationId: listAvailableModels
+      tags: [settings]
+      summary: List available AI models from configured provider
+      responses:
+        "200":
+          description: Available models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AIModel"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+        messageCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - model
+        - provider
+        - messageCount
+        - createdAt
+        - updatedAt
+
+    ConversationInput:
+      type: object
+      properties:
+        title:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+      required:
+        - title
+
+    ConversationUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+
+    ConversationWithMessages:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+        messageCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+      required:
+        - id
+        - title
+        - model
+        - provider
+        - messageCount
+        - createdAt
+        - updatedAt
+        - messages
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        role:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - conversationId
+        - role
+        - content
+        - createdAt
+
+    MessageInput:
+      type: object
+      properties:
+        content:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+      required:
+        - content
+
+    ChatStats:
+      type: object
+      properties:
+        totalConversations:
+          type: integer
+        totalMessages:
+          type: integer
+        todayMessages:
+          type: integer
+        mostUsedModel:
+          type: string
+      required:
+        - totalConversations
+        - totalMessages
+        - todayMessages
+        - mostUsedModel
+
+    GeneratedImage:
+      type: object
+      properties:
+        id:
+          type: integer
+        prompt:
+          type: string
+        url:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        model:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - prompt
+        - url
+        - width
+        - height
+        - model
+        - createdAt
+
+    ImageGenerateInput:
+      type: object
+      properties:
+        prompt:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        model:
+          type: string
+        style:
+          type: string
+      required:
+        - prompt
+
+    ImageEditInput:
+      type: object
+      properties:
+        fileId:
+          type: integer
+        prompt:
+          type: string
+        model:
+          type: string
+      required:
+        - fileId
+        - prompt
+
+    UploadedFile:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        originalName:
+          type: string
+        mimeType:
+          type: string
+        size:
+          type: integer
+        url:
+          type: string
+        category:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - originalName
+        - mimeType
+        - size
+        - url
+        - category
+        - createdAt
+
+    FileUploadInput:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+      required:
+        - file
+
+    VideoJob:
+      type: object
+      properties:
+        id:
+          type: integer
+        status:
+          type: string
+        inputFileId:
+          type: integer
+        outputFileId:
+          type: ["integer", "null"]
+        operation:
+          type: string
+        progress:
+          type: integer
+        error:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - status
+        - inputFileId
+        - outputFileId
+        - operation
+        - progress
+        - error
+        - createdAt
+        - updatedAt
+
+    VideoProcessInput:
+      type: object
+      properties:
+        fileId:
+          type: integer
+        operation:
+          type: string
+          enum: [trim, captions, filter, extract_audio]
+        startTime:
+          type: number
+        endTime:
+          type: number
+        filter:
+          type: string
+      required:
+        - fileId
+        - operation
+
+    Settings:
+      type: object
+      properties:
+        aiProvider:
+          type: string
+        ollamaUrl:
+          type: string
+        defaultModel:
+          type: string
+        imageModel:
+          type: string
+        imageWidth:
+          type: integer
+        imageHeight:
+          type: integer
+        theme:
+          type: string
+        systemPrompt:
+          type: string
+      required:
+        - aiProvider
+        - ollamaUrl
+        - defaultModel
+        - imageModel
+        - imageWidth
+        - imageHeight
+        - theme
+        - systemPrompt
+
+    SettingsUpdate:
+      type: object
+      properties:
+        aiProvider:
+          type: string
+        ollamaUrl:
+          type: string
+        defaultModel:
+          type: string
+        imageModel:
+          type: string
+        imageWidth:
+          type: integer
+        imageHeight:
+          type: integer
+        theme:
+          type: string
+        systemPrompt:
+          type: string
+
+    AIModel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+        description:
+          type: string
+      required:
+        - id
+        - name
+        - provider
+        - description
+
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
