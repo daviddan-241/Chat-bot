@@ -135,7 +135,7 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<{ stop(): void } | null>(null);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -239,14 +239,19 @@ export default function ChatPage() {
 
   const toggleVoice = () => {
     if (listening) { recognitionRef.current?.stop(); setListening(false); return; }
-    const SR = (window as Record<string, unknown>)["SpeechRecognition"] as typeof SpeechRecognition | undefined
-      || (window as Record<string, unknown>)["webkitSpeechRecognition"] as typeof SpeechRecognition | undefined;
+    const w = window as unknown as Record<string, unknown>;
+    const SR = (w["SpeechRecognition"] || w["webkitSpeechRecognition"]) as (new () => {
+      continuous: boolean; interimResults: boolean;
+      onresult: ((e: { results: { [i: number]: { [i: number]: { transcript: string } } } }) => void) | null;
+      onend: (() => void) | null;
+      start(): void; stop(): void;
+    }) | undefined;
     if (!SR) return;
     const r = new SR();
     r.continuous = true; r.interimResults = true;
-    r.onresult = (e) => { let t = ""; for (const res of e.results) t += res[0]!.transcript; setInput(t); };
+    r.onresult = (e) => { let t = ""; for (let i = 0; i < Object.keys(e.results).length; i++) t += (e.results[i]?.[0] as { transcript: string } | undefined)?.transcript ?? ""; setInput(t); };
     r.onend = () => setListening(false);
-    recognitionRef.current = r; r.start(); setListening(true);
+    recognitionRef.current = r as unknown as MediaRecorder; r.start(); setListening(true);
   };
 
   const currentModel = MODELS.find(m => m.id === model) || MODELS[0]!;
