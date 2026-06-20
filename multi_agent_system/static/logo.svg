@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1a0e2e"/>
+      <stop offset="100%" stop-color="#060a0f"/>
+    </radialGradient>
+    <linearGradient id="ring1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="ring2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ec4899"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="50%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#f472b6"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="glow2">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="120" fill="url(#bg)"/>
+
+  <!-- Outer ring glow -->
+  <circle cx="256" cy="256" r="210" fill="none" stroke="url(#ring1)" stroke-width="3" opacity="0.4" filter="url(#glow)"/>
+
+  <!-- Orbit rings -->
+  <ellipse cx="256" cy="256" rx="175" ry="60" fill="none" stroke="url(#ring1)" stroke-width="2.5" stroke-dasharray="8 6" opacity="0.7" transform="rotate(-25 256 256)"/>
+  <ellipse cx="256" cy="256" rx="175" ry="60" fill="none" stroke="url(#ring2)" stroke-width="2.5" stroke-dasharray="8 6" opacity="0.6" transform="rotate(55 256 256)"/>
+  <ellipse cx="256" cy="256" rx="175" ry="60" fill="none" stroke="#60a5fa" stroke-width="2" stroke-dasharray="5 8" opacity="0.5" transform="rotate(130 256 256)"/>
+
+  <!-- Orbit dots -->
+  <circle cx="256" cy="82" r="9" fill="#a78bfa" filter="url(#glow2)"/>
+  <circle cx="430" cy="256" r="7" fill="#60a5fa" filter="url(#glow2)"/>
+  <circle cx="100" cy="310" r="8" fill="#f472b6" filter="url(#glow2)"/>
+  <circle cx="370" cy="175" r="6" fill="#34d399" filter="url(#glow2)"/>
+  <circle cx="140" cy="185" r="6" fill="#fbbf24" filter="url(#glow2)"/>
+  <circle cx="380" cy="360" r="7" fill="#ec4899" filter="url(#glow2)"/>
+
+  <!-- Central nucleus -->
+  <circle cx="256" cy="256" r="78" fill="#0d1117" stroke="url(#core)" stroke-width="3"/>
+  <circle cx="256" cy="256" r="62" fill="url(#core)" opacity="0.15"/>
+
+  <!-- N letter (center) -->
+  <text x="256" y="290" font-family="'Arial Black', 'Helvetica', sans-serif" font-size="88" font-weight="900" fill="url(#core)" text-anchor="middle" filter="url(#glow2)">N</text>
+
+  <!-- Inner sparkles -->
+  <circle cx="256" cy="256" r="20" fill="none" stroke="url(#core)" stroke-width="1.5" opacity="0.5" stroke-dasharray="4 4"/>
+
+  <!-- Corner sparkle dots -->
+  <circle cx="185" cy="215" r="4" fill="#a78bfa" opacity="0.8"/>
+  <circle cx="327" cy="215" r="4" fill="#60a5fa" opacity="0.8"/>
+  <circle cx="185" cy="297" r="4" fill="#f472b6" opacity="0.8"/>
+  <circle cx="327" cy="297" r="4" fill="#34d399" opacity="0.8"/>
+</svg>

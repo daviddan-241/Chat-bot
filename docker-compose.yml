@@ -1,0 +1,28 @@
+version: '3.9'
+
+services:
+  nexus:
+    build: .
+    image: nexus-ai-chat:latest
+    container_name: nexus
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-nexus@agent.ai}
+      - GIT_USER_NAME=${GIT_USER_NAME:-NEXUS Agent}
+    volumes:
+      - nexus_uploads:/app/multi_agent_system/uploads
+      - nexus_workspace:/app/multi_agent_system/workspace
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  nexus_uploads:
+  nexus_workspace:
