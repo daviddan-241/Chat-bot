@@ -13,6 +13,8 @@ const NAV = [
   {id:'artifacts', ico:'✨', label:'Artifacts'},
   {id:'skills', ico:'📚', label:'Skills Library'},
   {sec:'Platform'},
+  {id:'wallet', ico:'💰', label:'Crypto Wallet'},
+  {id:'testplans', ico:'🗂️', label:'Test Plan Executor'},
   {id:'connectors', ico:'🔌', label:'Connectors'},
   {id:'deployments', ico:'🚀', label:'Deployments'},
   {id:'knowledge', ico:'🗄️', label:'Knowledge Base'},
@@ -30,7 +32,7 @@ function buildNav(){
 
 const TITLES={chat:'New Chat',agents:'Agent Dashboard',connectors:'Connectors',settings:'Settings',
   artifacts:'Artifacts',projects:'Projects',skills:'Skills Library',deployments:'Deployments',
-  knowledge:'Knowledge Base',history:'Chat History'};
+  knowledge:'Knowledge Base',history:'Chat History',wallet:'Crypto Wallet',testplans:'Test Plan Executor'};
 
 /* ── TOAST ── */
 function toast(msg){
@@ -44,24 +46,25 @@ function go(id){
   if(AUTO_REFRESH){ clearInterval(AUTO_REFRESH); AUTO_REFRESH=null; }
   document.querySelectorAll('.nav-item').forEach(e=>e.classList.toggle('active',e.dataset.id===id));
   document.getElementById('viewTitle').textContent = TITLES[id]||id;
-  ['chat','agents','connectors','settings','artifacts'].forEach(v=>{
+  ['chat','agents','connectors','settings','artifacts','wallet'].forEach(v=>{
     const el=document.getElementById('view-'+v); if(el) el.classList.remove('active');
   });
   document.getElementById('view-generic').classList.remove('active');
   document.getElementById('inputbar').style.display = (id==='chat')?'block':'none';
 
   document.getElementById('fab').style.display = (id==='chat')?'grid':'none';
-  if(['chat','agents','connectors','settings','artifacts','skills','deployments','projects','history'].includes(id)){
-    let v=id; if(id==='skills'||id==='deployments'||id==='projects'||id==='history') v='generic';
+  if(['chat','agents','connectors','settings','artifacts','skills','deployments','projects','history','wallet','testplans'].includes(id)){
     if(id==='skills'){ document.getElementById('view-generic').classList.add('active'); loadSkills(); }
     else if(id==='deployments'){ document.getElementById('view-generic').classList.add('active'); loadDeployments(); }
     else if(id==='projects'){ document.getElementById('view-generic').classList.add('active'); loadProjects(); }
     else if(id==='history'){ document.getElementById('view-generic').classList.add('active'); loadHistory(); }
+    else if(id==='testplans'){ document.getElementById('view-generic').classList.add('active'); loadTestPlans(); }
     else { document.getElementById('view-'+id).classList.add('active');
       if(id==='agents'){ loadAgents(); AUTO_REFRESH=setInterval(()=>{ if(document.getElementById('view-agents').classList.contains('active')) loadAgents(); }, 4000); }
       if(id==='connectors') loadConnectors();
       if(id==='settings') loadSettings();
       if(id==='artifacts') loadArtifacts();
+      if(id==='wallet') loadWallet();
     }
   } else {
     const g=document.getElementById('view-generic'); g.classList.add('active');
@@ -834,6 +837,557 @@ async function uploadSkill(file){
   }catch(e){ if(msg) msg.textContent='Error: '+e.message; }
 }
 async function delSkill(id){ await fetch(`${API}/skills/${id}`,{method:'DELETE'}); toast('Removed'); renderSkillList(); }
+
+/* ══════════════════════════════════════════════════════════════════
+   CRYPTO WALLET
+   ══════════════════════════════════════════════════════════════════ */
+let WLT_COIN = 'ltc';
+let WLT_WALLETS = {ltc:[], xmr:[]};
+
+async function loadWallet(){
+  const wrap = document.getElementById('walletWrap');
+  wrap.innerHTML = '<div style="color:var(--muted);padding:40px;text-align:center"><span class="spinner"></span> Loading wallets…</div>';
+  try {
+    const r = await (await fetch('/api/wallet/list')).json();
+    WLT_WALLETS = {ltc: r.ltc||[], xmr: r.xmr||[]};
+  } catch(e) { WLT_WALLETS = {ltc:[],xmr:[]}; }
+  renderWallet();
+}
+
+function renderWallet(){
+  const wrap = document.getElementById('walletWrap');
+  const coin = WLT_COIN;
+  const wallets = WLT_WALLETS[coin] || [];
+  const coinMeta = {
+    ltc: {name:'Litecoin', symbol:'LTC', color:'#bfbbbb', icon:'Ł', note:'Full send/receive via free blockchain APIs'},
+    xmr: {name:'Monero', symbol:'XMR', color:'#F26822', icon:'ɱ', note:'Private by design · view-key balance · offline keygen'},
+  };
+  const m = coinMeta[coin];
+
+  wrap.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+      <div class="coin-tabs">
+        <button class="coin-tab ${coin==='ltc'?'active':''}" onclick="switchCoin('ltc')">Ł Litecoin</button>
+        <button class="coin-tab ${coin==='xmr'?'active':''}" onclick="switchCoin('xmr')">ɱ Monero</button>
+      </div>
+      <button class="btn" style="margin-left:auto" onclick="newWallet('${coin}')">＋ New ${m.symbol} Wallet</button>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin:-10px 0 16px">${m.note}</p>
+    <div id="wlt-list"></div>
+    <div id="wlt-msg" style="margin-top:12px;font-size:13px"></div>`;
+
+  const list = document.getElementById('wlt-list');
+  if(!wallets.length){
+    list.innerHTML = `<div class="wallet-empty"><div class="big">${m.icon}</div>
+      <p>No ${m.name} wallets yet.</p>
+      <button class="btn" onclick="newWallet('${coin}')">Generate ${m.symbol} wallet</button></div>`;
+    return;
+  }
+  list.innerHTML = wallets.map((w,i) => walletCard(w, coin, i)).join('');
+}
+
+function walletCard(w, coin, idx){
+  const sym = coin==='ltc'?'LTC':'XMR';
+  const qr = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(w.address)}&margin=8`;
+  const ts = w.created ? new Date(w.created*1000).toLocaleDateString() : '';
+  return `<div class="wallet-card" id="wcard-${idx}">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div>
+        <span style="font-weight:700;font-size:16px">${esc(w.label||'Wallet')}</span>
+        <span class="wallet-badge">${sym}</span>
+        ${ts?`<span style="font-size:12px;color:var(--muted);margin-left:8px">${ts}</span>`:''}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn sec" style="padding:6px 12px;font-size:12px" onclick="checkBalance('${coin}','${esc(w.address)}',${idx})">Check Balance</button>
+        <button class="btn sec" style="padding:6px 12px;font-size:12px;color:var(--error)" onclick="deleteWallet('${coin}','${esc(w.address)}')">Delete</button>
+      </div>
+    </div>
+    <div class="addr" onclick="copyText('${esc(w.address)}')" title="Click to copy">${esc(w.address)}</div>
+    <div class="bal" id="bal-${idx}"><small style="font-size:13px;color:var(--muted)">Balance not loaded — click Check Balance</small></div>
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-top:10px">
+      <div class="qr-box"><img src="${qr}" alt="QR" loading="lazy" style="width:120px;height:120px;border-radius:10px"></div>
+      <div style="flex:1;min-width:180px">
+        <button class="btn sec" style="padding:6px 12px;font-size:12px;margin-bottom:8px" onclick="toggleKeys('${coin}','${esc(w.address)}',${idx})">Show Private Keys ▾</button>
+        <div id="keys-${idx}" style="display:none"></div>
+      </div>
+    </div>
+    <div class="send-form" id="send-${idx}" style="display:none"></div>
+    <div style="margin-top:10px">
+      <button class="btn sec" style="padding:6px 14px;font-size:13px" onclick="toggleSend('${coin}','${esc(w.address)}',${idx})">📤 Send ${sym}</button>
+    </div>
+  </div>`;
+}
+
+function switchCoin(c){ WLT_COIN=c; renderWallet(); }
+
+async function newWallet(coin){
+  const label = prompt(`Label for this ${coin.toUpperCase()} wallet:`, 'lab-wallet');
+  if(label===null) return;
+  const msg = document.getElementById('wlt-msg');
+  msg.innerHTML = '<span class="spinner"></span> Generating wallet offline…';
+  try {
+    const r = await (await fetch(`/api/wallet/new/${coin}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:label||'default'})})).json();
+    if(r.ok){
+      toast(`${coin.toUpperCase()} wallet generated`);
+      msg.innerHTML = `<span style="color:var(--success)">✅ Wallet ready — address saved locally.</span>`;
+      WLT_WALLETS[coin].unshift({address:r.address, label:r.label||label, created:r.created});
+      renderWallet();
+    } else {
+      msg.innerHTML = `<span style="color:var(--error)">⚠️ ${esc(r.error)}</span>`;
+    }
+  } catch(e){ msg.innerHTML = `<span style="color:var(--error)">Error: ${esc(e.message)}</span>`; }
+}
+
+async function checkBalance(coin, address, idx){
+  const el = document.getElementById('bal-'+idx);
+  el.innerHTML = '<span class="spinner"></span> Checking…';
+  try {
+    const r = await (await fetch(`/api/wallet/${coin}/balance/${encodeURIComponent(address)}`)).json();
+    if(r.balance !== null && r.balance !== undefined){
+      const sym = coin==='ltc'?'LTC':'XMR';
+      el.innerHTML = `<span style="font-size:22px;font-weight:700">${parseFloat(r.balance).toFixed(8)}</span> <small>${sym}</small>
+        ${r.received!==undefined?`<div style="font-size:12px;color:var(--muted);margin-top:2px">Received: ${parseFloat(r.received||0).toFixed(8)} · Tx: ${r.tx_count||0} · <a href="${r.explorer||'#'}" target="_blank" style="color:var(--accent)">Explorer ↗</a></div>`:''}
+        ${r.note?`<div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(r.note)}</div>`:''}`;
+    } else {
+      el.innerHTML = `<span style="font-size:13px;color:var(--muted)">${esc(r.note||r.error||'No balance data')}</span>`;
+    }
+  } catch(e){ el.innerHTML = `<span style="color:var(--error);font-size:13px">Error: ${esc(e.message)}</span>`; }
+}
+
+async function toggleKeys(coin, address, idx){
+  const el = document.getElementById('keys-'+idx);
+  if(el.style.display==='none'){
+    el.style.display='block';
+    el.innerHTML = '<span class="spinner"></span> Loading…';
+    try {
+      const r = await (await fetch(`/api/wallet/${coin}/get/${encodeURIComponent(address)}`)).json();
+      if(!r.ok){ el.innerHTML=`<span style="color:var(--error)">${esc(r.error)}</span>`; return; }
+      const w = r.wallet;
+      const rows = [];
+      if(coin==='ltc'){
+        rows.push(['WIF Key', w.wif||''], ['Private Hex', w.private_hex||''], ['Public Hex', w.public_hex||'']);
+      } else {
+        rows.push(['Seed Phrase', w.seed_phrase||''], ['Spend Key', w.spend_key||''], ['View Key', w.view_key||'']);
+      }
+      el.innerHTML = `<div style="margin-top:6px">
+        <div style="font-size:11px;color:var(--error);font-weight:600;margin-bottom:8px">⚠️ Never share private keys. Store offline securely.</div>
+        ${rows.map(([k,v])=>`<div class="key-row">
+          <span class="kl">${k}</span>
+          <span class="kv">${esc(v)}</span>
+          <span class="copy" onclick="copyText('${esc(v)}')" title="Copy">📋</span>
+        </div>`).join('')}
+      </div>`;
+    } catch(e){ el.innerHTML=`<span style="color:var(--error)">${esc(e.message)}</span>`; }
+  } else { el.style.display='none'; }
+}
+
+function toggleSend(coin, address, idx){
+  const el = document.getElementById('send-'+idx);
+  if(el.style.display==='none'){
+    const sym = coin==='ltc'?'LTC':'XMR';
+    el.style.display='block';
+    el.innerHTML = `<h4>📤 Send ${sym}</h4>
+      <input type="text" id="sendTo-${idx}" placeholder="Destination address">
+      <input type="number" id="sendAmt-${idx}" placeholder="Amount (${sym})" step="0.00000001" min="0">
+      ${coin==='ltc'?`<input type="text" id="sendWif-${idx}" placeholder="WIF private key (if not stored here)">`:''}
+      <div id="sendOut-${idx}" style="font-size:13px;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" onclick="doSend('${coin}','${esc(address)}',${idx})">Confirm Send</button>
+        <button class="btn sec" onclick="document.getElementById('send-${idx}').style.display='none'">Cancel</button>
+      </div>`;
+  } else { el.style.display='none'; }
+}
+
+async function doSend(coin, fromAddr, idx){
+  const to = (document.getElementById('sendTo-'+idx)||{}).value||'';
+  const amt = parseFloat((document.getElementById('sendAmt-'+idx)||{}).value||0);
+  const wif = (document.getElementById('sendWif-'+idx)||{}).value||'';
+  const out = document.getElementById('sendOut-'+idx);
+  if(!to||!amt){ out.innerHTML='<span style="color:var(--error)">Enter destination and amount.</span>'; return; }
+  out.innerHTML = '<span class="spinner"></span> Broadcasting…';
+  try {
+    const body = {from:fromAddr, to, amount:amt};
+    if(wif) body.wif=wif;
+    const r = await (await fetch(`/api/wallet/${coin}/send`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.ok){
+      out.innerHTML = `<span style="color:var(--success)">✅ Sent ${r.amount} ${coin.toUpperCase()}<br>
+        TXID: <a href="${r.explorer||'#'}" target="_blank" style="color:var(--accent);font-family:monospace;font-size:12px">${esc(r.txid||'')}</a></span>`;
+    } else if(r.send_command){
+      out.innerHTML = `<div style="margin-top:8px">
+        <div style="font-size:13px;color:var(--text2);margin-bottom:6px">${esc(r.note||'Use the CLI command below to send.')}</div>
+        <pre style="background:#10100E;color:#7FFF7F;border-radius:10px;padding:12px;font-size:12px;white-space:pre-wrap;overflow:auto">${esc(r.send_command)}</pre>
+        <button class="btn sec" style="margin-top:6px;padding:6px 12px;font-size:12px" onclick="copyText('${esc(r.send_command)}')">Copy command</button></div>`;
+    } else {
+      out.innerHTML = `<span style="color:var(--error)">⚠️ ${esc(r.error||'failed')}</span>`;
+    }
+  } catch(e){ out.innerHTML=`<span style="color:var(--error)">Error: ${esc(e.message)}</span>`; }
+}
+
+async function deleteWallet(coin, address){
+  if(!confirm(`Delete ${coin.toUpperCase()} wallet ${address.slice(0,16)}…? This removes it from local storage.`)) return;
+  const r = await (await fetch(`/api/wallet/${coin}/delete/${encodeURIComponent(address)}`,{method:'DELETE'})).json();
+  if(r.ok){ toast('Wallet removed'); loadWallet(); }
+  else toast('Error: '+(r.error||'failed'));
+}
+
+function copyText(t){
+  navigator.clipboard.writeText(t).then(()=>toast('Copied!')).catch(()=>{
+    const el=document.createElement('textarea'); el.value=t;
+    document.body.appendChild(el); el.select(); document.execCommand('copy'); el.remove(); toast('Copied!');
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TEST PLAN EXECUTOR
+   ─ Human-in-the-loop with 50 s auto-proceed countdown
+   ─ Visual YAML plan builder (no external editor needed)
+   ─ Kali Linux routing toggle
+   ══════════════════════════════════════════════════════════════════ */
+let TP_PLAN    = null;
+let TP_IDX     = 0;
+let TP_KALI    = true;
+let TP_LOG     = [];
+let TP_RUNNING = false;
+let TP_TIMER   = null;   // setInterval handle for countdown
+let TP_SECS    = 50;     // countdown seconds remaining
+const TP_AUTO_SECS = 50; // reset value
+
+/* ── Build steps from the visual form ──────────────────────────── */
+let BP_STEPS = [];  // builder steps [{name,desc,cmd}]
+
+function loadTestPlans(){
+  const g = document.getElementById('view-generic'); g.classList.add('active');
+  const wrap = g.querySelector('.wrap');
+  wrap.innerHTML = `
+  <div class="card" style="margin-bottom:10px">
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn" id="tpTabRun" onclick="tpTab('run')" style="flex:1">▶ Run Plan</button>
+      <button class="btn sec" id="tpTabBuild" onclick="tpTab('build')" style="flex:1">🛠 Build Plan</button>
+    </div>
+    <div id="tpRunPanel">
+      <h3 style="margin:0 0 8px">Test Plan Executor</h3>
+      <p style="color:var(--text2);font-size:13px;margin:0 0 12px">
+        Load a YAML plan → each step waits for your click.<br>
+        <b>Auto-proceeds after 50 s</b> if you don't act — click ⏸ to pause auto-run.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" onclick="document.getElementById('planInput').click()">📂 Load YAML</button>
+        <button class="btn sec" onclick="loadExamplePlan()">Load example</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)">
+          <input type="checkbox" id="tpKali" ${TP_KALI?'checked':''} onchange="TP_KALI=this.checked"> Kali Linux
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)">
+          <input type="checkbox" id="tpAutoRun" checked> Auto-proceed (50 s)
+        </label>
+      </div>
+      <input type="file" id="planInput" style="display:none" accept=".yaml,.yml,.json" onchange="onPlanFile(this)">
+      <div id="tpStatus" style="font-size:13px;color:var(--muted);margin-top:10px">No plan loaded.</div>
+    </div>
+    <div id="tpBuildPanel" style="display:none">
+      <h3 style="margin:0 0 8px">Plan Builder</h3>
+      <p style="color:var(--text2);font-size:13px;margin:0 0 10px">Build a YAML plan visually — add steps, then run or export.</p>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <input id="bpName" placeholder="Plan name" style="flex:2;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px">
+        <input id="bpDesc" placeholder="Description (optional)" style="flex:3;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px">
+      </div>
+      <div id="bpStepList" style="margin-bottom:10px"></div>
+      <button class="btn sec" onclick="bpAddStep()" style="width:100%;margin-bottom:10px">＋ Add Step</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="bpRunPlan()">▶ Run this plan</button>
+        <button class="btn sec" onclick="bpExportYaml()">⬇ Export YAML</button>
+        <button class="btn sec" onclick="bpClear()">🗑 Clear</button>
+      </div>
+    </div>
+  </div>
+  <div id="tpPlanCard" style="display:none" class="card">
+    <div id="tpPlanHeader"></div>
+    <div id="tpSteps"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center">
+      <button class="btn" id="tpRunBtn" onclick="tpManualRun()">▶ Run Step</button>
+      <button class="btn sec" id="tpPauseBtn" onclick="tpTogglePause()">⏸ Pause auto</button>
+      <button class="btn sec" onclick="skipStep()">⏭ Skip</button>
+      <button class="btn sec" style="color:var(--error)" onclick="stopPlan()">■ Stop</button>
+      <button class="btn sec" onclick="downloadLog()">⬇ Log</button>
+      <span id="tpCountdown" style="font-size:13px;color:var(--accent);font-weight:600;margin-left:4px"></span>
+    </div>
+  </div>`;
+  renderBpSteps();
+}
+
+let TP_PAUSED = false;
+function tpTab(t){
+  document.getElementById('tpRunPanel').style.display   = t==='run'  ?'block':'none';
+  document.getElementById('tpBuildPanel').style.display = t==='build'?'block':'none';
+  document.getElementById('tpTabRun').className   = t==='run'  ?'btn':'btn sec';
+  document.getElementById('tpTabBuild').className = t==='build'?'btn':'btn sec';
+}
+
+/* ── Countdown helpers ─────────────────────────────────────────── */
+function tpStartCountdown(){
+  tpClearCountdown();
+  if(!document.getElementById('tpAutoRun')?.checked) return;
+  TP_SECS = TP_AUTO_SECS;
+  _updateCountdownEl();
+  TP_TIMER = setInterval(()=>{
+    if(TP_PAUSED||TP_RUNNING) return;
+    TP_SECS--;
+    _updateCountdownEl();
+    if(TP_SECS<=0){ tpClearCountdown(); runNextStep(); }
+  }, 1000);
+}
+function tpClearCountdown(){
+  if(TP_TIMER){ clearInterval(TP_TIMER); TP_TIMER=null; }
+  _updateCountdownEl();
+}
+function _updateCountdownEl(){
+  const el=document.getElementById('tpCountdown'); if(!el) return;
+  if(TP_TIMER && !TP_PAUSED && TP_SECS>0)
+    el.textContent=`Auto in ${TP_SECS}s`;
+  else if(TP_PAUSED)
+    el.textContent='⏸ Paused';
+  else
+    el.textContent='';
+}
+function tpTogglePause(){
+  TP_PAUSED=!TP_PAUSED;
+  const btn=document.getElementById('tpPauseBtn');
+  if(btn) btn.textContent = TP_PAUSED?'▶ Resume auto':'⏸ Pause auto';
+  _updateCountdownEl();
+}
+function tpManualRun(){ tpClearCountdown(); runNextStep(); }
+
+/* ── Plan loading ──────────────────────────────────────────────── */
+function loadExamplePlan(){
+  parsePlanYaml(`name: Recon Plan
+description: Ping, port scan, banner grab
+kali: true
+steps:
+  - name: Host alive check
+    desc: Verify target responds to ICMP
+    cmd: ping -c 2 -W 1 10.0.0.1 && echo ALIVE || echo DOWN
+  - name: Fast port scan
+    desc: Top 100 ports via nmap
+    cmd: nmap -T4 -F 10.0.0.1
+  - name: Service versions
+    desc: Detect service banners
+    cmd: nmap -sV --version-intensity 3 -p 22,80,443,8080 10.0.0.1
+  - name: HTTP headers
+    desc: Grab HTTP response headers
+    cmd: curl -sI --max-time 8 http://10.0.0.1 || echo no-http
+  - name: DNS info
+    desc: DNS records for target
+    cmd: dig +short 10.0.0.1 || nslookup 10.0.0.1`, 'recon-plan.yaml');
+}
+
+function onPlanFile(inp){
+  const f=inp.files[0]; if(!f) return; inp.value='';
+  new FileReader().onload = e => parsePlanYaml(e.target.result, f.name);
+  const rd=new FileReader(); rd.onload=e=>parsePlanYaml(e.target.result,f.name); rd.readAsText(f);
+}
+
+function parsePlanYaml(text, filename){
+  try {
+    const plan={name:filename,description:'',steps:[],kali:true};
+    let cur=null;
+    for(const raw of text.split('\n')){
+      const line=raw.trimEnd(), ind=raw.length-raw.trimStart().length;
+      if(!line.trim()||line.trim().startsWith('#')) continue;
+      if(ind===0){
+        const m=line.match(/^(\w+)\s*:\s*(.*)/); if(!m) continue;
+        const [,k,v]=m;
+        if(k==='name') plan.name=v.trim();
+        else if(k==='description') plan.description=v.trim();
+        else if(k==='kali') plan.kali=v.trim()!=='false';
+        cur=null;
+      } else if(line.trim().startsWith('-')&&ind<=2){
+        cur={name:'Step '+(plan.steps.length+1),desc:'',cmd:''};
+        plan.steps.push(cur);
+        const inl=line.trim().slice(1).trim();
+        if(inl){const m2=inl.match(/^(\w+)\s*:\s*(.*)/);if(m2)cur[m2[1].trim()]=m2[2].trim();}
+      } else if(cur&&ind>2){
+        const m3=line.trim().match(/^(\w+)\s*:\s*(.*)/);
+        if(m3){const[,k,v]=m3;cur[k.trim()]=v.trim();}
+      }
+    }
+    if(!plan.steps.length){
+      const el=document.getElementById('tpStatus'); if(el) el.innerHTML='<span style="color:var(--error)">No steps found. Check YAML format.</span>';
+      return;
+    }
+    TP_PLAN=plan; TP_IDX=0; TP_LOG=[]; TP_RUNNING=false; TP_PAUSED=false;
+    TP_KALI=plan.kali!==false;
+    const kChk=document.getElementById('tpKali'); if(kChk) kChk.checked=TP_KALI;
+    renderPlan();
+  } catch(e){
+    const el=document.getElementById('tpStatus'); if(el) el.innerHTML=`<span style="color:var(--error)">Parse error: ${esc(e.message)}</span>`;
+  }
+}
+
+function renderPlan(){
+  const pc=document.getElementById('tpPlanCard'); if(pc) pc.style.display='block';
+  const st=document.getElementById('tpStatus');
+  if(st) st.innerHTML=`<span style="color:var(--success)">✅ <b>${esc(TP_PLAN.name)}</b> — ${TP_PLAN.steps.length} steps loaded</span>`;
+  const ph=document.getElementById('tpPlanHeader');
+  if(ph) ph.innerHTML=`<h3 style="margin:0 0 4px">${esc(TP_PLAN.name)}</h3>${TP_PLAN.description?`<p style="color:var(--text2);font-size:13px;margin:0 0 10px">${esc(TP_PLAN.description)}</p>`:''}`;
+  renderSteps();
+  tpStartCountdown();
+}
+
+function renderSteps(){
+  const el=document.getElementById('tpSteps'); if(!TP_PLAN||!el) return;
+  el.innerHTML=TP_PLAN.steps.map((s,i)=>{
+    const log=TP_LOG.find(l=>l.idx===i);
+    const active=i===TP_IDX&&!TP_RUNNING;
+    const st=log?(log.status==='ok'?'✅':(log.status==='skip'?'⏭':'⚠️')):(i<TP_IDX?'⏭':'○');
+    const bg=active?'background:var(--accent-light);border-color:var(--accent)':'';
+    return `<div style="border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;transition:.2s;${bg}">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px;flex-shrink:0">${i===TP_IDX&&TP_RUNNING?'<span class="spinner"></span>':st}</span>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">Step ${i+1}: ${esc(s.name||'')}</div>
+          ${s.desc?`<div style="font-size:12px;color:var(--text2)">${esc(s.desc)}</div>`:''}
+        </div>
+        ${active?`<span style="font-size:11px;color:var(--accent);font-weight:600">← current</span>`:''}
+      </div>
+      <pre style="background:var(--bg2);border-radius:8px;padding:8px 10px;font-size:12px;font-family:ui-monospace,monospace;margin:8px 0 0;overflow:auto;white-space:pre-wrap">${esc(s.cmd)}</pre>
+      ${log&&log.output?`<pre style="background:#10100E;color:#D4F5C4;border-radius:8px;padding:8px 10px;font-size:12px;font-family:ui-monospace,monospace;margin:6px 0 0;max-height:200px;overflow:auto">${esc(log.output)}</pre>`:''}
+    </div>`;
+  }).join('');
+  const runBtn=document.getElementById('tpRunBtn');
+  if(runBtn){
+    runBtn.disabled=TP_RUNNING||TP_IDX>=TP_PLAN.steps.length;
+    runBtn.textContent=TP_IDX>=TP_PLAN.steps.length?'✅ Complete':
+      `▶ Run Step ${TP_IDX+1}: ${esc((TP_PLAN.steps[TP_IDX]||{}).name||'')}`;
+  }
+}
+
+async function runNextStep(){
+  if(!TP_PLAN||TP_RUNNING||TP_IDX>=TP_PLAN.steps.length) return;
+  tpClearCountdown();
+  const step=TP_PLAN.steps[TP_IDX];
+  TP_RUNNING=true; renderSteps();
+  try {
+    const kali=document.getElementById('tpKali')?.checked;
+    const ep=kali?'/api/kali-exec':'/api/shell';
+    const body=kali?{cmd:step.cmd,timeout:90,session:'testplan'}:{command:step.cmd,timeout:90};
+    const r=await (await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    const out=r.output||r.stdout||r.error||'(no output)';
+    const ok=r.ok!==false&&r.success!==false;
+    TP_LOG.push({idx:TP_IDX,step:step.name,cmd:step.cmd,output:out,status:ok?'ok':'err'});
+    TP_IDX++;
+  } catch(e){
+    TP_LOG.push({idx:TP_IDX,step:step.name,cmd:step.cmd,output:'Error: '+e.message,status:'err'});
+    TP_IDX++;
+  }
+  TP_RUNNING=false; renderSteps();
+  if(TP_IDX>=TP_PLAN.steps.length){
+    tpClearCountdown(); toast('✅ Plan complete — '+TP_PLAN.steps.length+' steps');
+  } else {
+    tpStartCountdown();  // start countdown for next step
+  }
+}
+
+function skipStep(){
+  if(!TP_PLAN||TP_RUNNING||TP_IDX>=TP_PLAN.steps.length) return;
+  tpClearCountdown();
+  TP_LOG.push({idx:TP_IDX,step:(TP_PLAN.steps[TP_IDX]||{}).name,cmd:'',output:'(skipped by user)',status:'skip'});
+  TP_IDX++; renderSteps();
+  if(TP_IDX<TP_PLAN.steps.length) tpStartCountdown();
+}
+
+function stopPlan(){
+  tpClearCountdown(); TP_RUNNING=false; TP_PAUSED=false;
+  TP_IDX=TP_PLAN?TP_PLAN.steps.length:0; renderSteps(); toast('Plan stopped');
+}
+
+function downloadLog(){
+  if(!TP_PLAN) return;
+  const txt=[
+    `# Test Plan Log — ${TP_PLAN.name}`,
+    `# Date: ${new Date().toISOString()}`,
+    `# Steps: ${TP_PLAN.steps.length}  Executed: ${TP_LOG.length}`,
+    '',
+    ...TP_LOG.map(l=>[
+      `## Step ${l.idx+1}: ${l.step}`,
+      `$ ${l.cmd}`,
+      l.output,
+      `Status: ${l.status}`,
+      '─'.repeat(60),
+    ].join('\n')),
+  ].join('\n\n');
+  const a=document.createElement('a');
+  a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(txt);
+  a.download=`testplan-log-${Date.now()}.txt`; a.click();
+}
+
+/* ── Visual plan BUILDER ───────────────────────────────────────── */
+function renderBpSteps(){
+  const el=document.getElementById('bpStepList'); if(!el) return;
+  if(!BP_STEPS.length){
+    el.innerHTML='<p style="color:var(--muted);font-size:13px;text-align:center;padding:16px">No steps yet — click ＋ Add Step</p>';
+    return;
+  }
+  el.innerHTML=BP_STEPS.map((s,i)=>`
+    <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;background:var(--card)">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+        <span style="font-weight:700;font-size:13px;color:var(--muted)">Step ${i+1}</span>
+        <div style="flex:1"></div>
+        <button onclick="bpMoveStep(${i},-1)" style="font-size:14px;padding:2px 6px;border-radius:6px;background:var(--bg2);border:1px solid var(--border)">▲</button>
+        <button onclick="bpMoveStep(${i},1)"  style="font-size:14px;padding:2px 6px;border-radius:6px;background:var(--bg2);border:1px solid var(--border)">▼</button>
+        <button onclick="bpDelStep(${i})" style="font-size:14px;padding:2px 6px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);color:var(--error)">✕</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+        <input value="${esc(s.name)}" placeholder="Step name" onchange="BP_STEPS[${i}].name=this.value"
+          style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+        <input value="${esc(s.desc)}" placeholder="Description" onchange="BP_STEPS[${i}].desc=this.value"
+          style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+      </div>
+      <textarea rows="2" onchange="BP_STEPS[${i}].cmd=this.value"
+        style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:#10100E;color:#D4F5C4;font-family:ui-monospace,monospace;font-size:13px;resize:vertical"
+        placeholder="Command to run…">${esc(s.cmd)}</textarea>
+    </div>`).join('');
+}
+
+function bpAddStep(){
+  BP_STEPS.push({name:'Step '+(BP_STEPS.length+1),desc:'',cmd:''});
+  renderBpSteps();
+}
+function bpDelStep(i){ BP_STEPS.splice(i,1); renderBpSteps(); }
+function bpMoveStep(i,d){
+  const j=i+d; if(j<0||j>=BP_STEPS.length) return;
+  [BP_STEPS[i],BP_STEPS[j]]=[BP_STEPS[j],BP_STEPS[i]]; renderBpSteps();
+}
+function bpClear(){ if(!confirm('Clear all steps?')) return; BP_STEPS=[]; renderBpSteps(); }
+
+function bpExportYaml(){
+  const name=(document.getElementById('bpName')||{}).value||'My Plan';
+  const desc=(document.getElementById('bpDesc')||{}).value||'';
+  const yaml=[
+    `name: ${name}`,
+    `description: ${desc}`,
+    `kali: ${TP_KALI}`,
+    `steps:`,
+    ...BP_STEPS.map(s=>[
+      `  - name: ${s.name}`,
+      `    desc: ${s.desc||''}`,
+      `    cmd: ${s.cmd}`,
+    ].join('\n')),
+  ].join('\n');
+  const a=document.createElement('a');
+  a.href='data:text/yaml;charset=utf-8,'+encodeURIComponent(yaml);
+  a.download=name.replace(/\W+/g,'-').toLowerCase()+'.yaml'; a.click();
+}
+
+function bpRunPlan(){
+  const name=(document.getElementById('bpName')||{}).value||'Built Plan';
+  const desc=(document.getElementById('bpDesc')||{}).value||'';
+  if(!BP_STEPS.length){ toast('Add at least one step first'); return; }
+  const yaml=[
+    `name: ${name}`,`description: ${desc}`,`kali: ${TP_KALI}`,`steps:`,
+    ...BP_STEPS.map(s=>`  - name: ${s.name}\n    desc: ${s.desc||''}\n    cmd: ${s.cmd}`),
+  ].join('\n');
+  parsePlanYaml(yaml, name);
+  tpTab('run');
+}
 
 /* ──────────────────────────────────────────────────────────────────
    DEPLOYMENTS VIEW (shortcut to deploy current project)
