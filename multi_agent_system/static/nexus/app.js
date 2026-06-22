@@ -14,6 +14,8 @@ const NAV = [
   {id:'skills',    ico:'📚', label:'Skills Library'},
   {sec:'Local AI'},
   {id:'models',    ico:'🤖', label:'AI Models'},
+  {sec:'Collaboration'},
+  {id:'mux',       ico:'🖥️', label:'Terminal Mux'},
   {sec:'Security'},
   {id:'workflow',  ico:'⚡', label:'Auto Workflow'},
   {id:'testplans', ico:'🗂️', label:'Test Plans'},
@@ -78,6 +80,7 @@ function go(id){
     else if(id==='projects')   { document.getElementById('view-generic').classList.add('active'); loadProjects(); }
     else if(id==='history')    { document.getElementById('view-generic').classList.add('active'); loadHistory(); }
     else if(id==='testplans')  { document.getElementById('view-generic').classList.add('active'); loadTestPlans(); }
+    else if(id==='mux')        { document.getElementById('view-generic').classList.add('active'); loadMux(); }
     else if(id==='models')     { document.getElementById('view-generic').classList.add('active'); loadModels(); }
     else if(id==='workflow')   { document.getElementById('view-generic').classList.add('active'); loadWorkflow(); }
     else if(id==='edr')        { document.getElementById('view-generic').classList.add('active'); loadEdr(); }
@@ -1539,6 +1542,345 @@ function bpRunPlan(){
   ].join('\n');
   parsePlanYaml(yaml, name);
   tpTab('run');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TERMINAL MUX — Real-time collaborative terminal
+   Role-based permissions: owner / exploit / recon / reporting
+   ══════════════════════════════════════════════════════════════════ */
+let _mux = {
+  sid: null, token: null, role: null, name: null,
+  isOwner: false, ownerToken: null,
+  es: null,          // EventSource
+  history: [],       // rendered lines
+  cmdHistory: [],    // typed commands
+  cmdIdx: -1,
+};
+
+async function loadMux(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  let sessions=[];
+  try { const r=await (await fetch('/api/mux/sessions')).json(); sessions=r.sessions||[]; } catch(e){}
+
+  wrap.innerHTML=`
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;min-height:70vh">
+
+    <!-- LEFT PANEL: session management + participants -->
+    <div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
+
+      <div class="card" style="padding:12px">
+        <h3 style="margin:0 0 10px;font-size:14px">🖥️ Terminal Mux</h3>
+        ${_mux.sid?`
+        <div style="font-size:12px;margin-bottom:8px">
+          <div style="color:var(--muted);font-size:10px">SESSION</div>
+          <code style="font-size:10px">${esc(_mux.sid.slice(0,12))}…</code>
+        </div>
+        <button class="btn sec" style="width:100%;margin-bottom:5px;font-size:12px"
+          onclick="muxCopyLink()">🔗 Copy Link</button>
+        <button class="btn sec" style="width:100%;margin-bottom:5px;font-size:12px;color:var(--error)"
+          onclick="muxLeave()">Leave Session</button>
+        ${_mux.isOwner?`<button class="btn sec" style="width:100%;font-size:12px;color:var(--error)"
+          onclick="muxClose()">✕ Close Session</button>`:''}
+        `:`
+        <button class="btn" style="width:100%;margin-bottom:6px;font-size:12px"
+          onclick="muxShowCreate()">＋ New Session</button>
+        <button class="btn sec" style="width:100%;font-size:12px"
+          onclick="muxShowJoin()">⤵ Join Session</button>`}
+      </div>
+
+      <div class="card" style="padding:12px;flex:1">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px">PARTICIPANTS</div>
+        <div id="muxParticipants">
+          ${_mux.sid?'<span class="spinner"></span>':'<span style="font-size:12px;color:var(--muted)">No active session</span>'}
+        </div>
+      </div>
+
+      <div class="card" style="padding:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px">ROLE PERMISSIONS</div>
+        <div style="font-size:11px;line-height:1.6">
+          <div>👑 <b>owner</b> — all tools</div>
+          <div>⚔️ <b>exploit</b> — security tools</div>
+          <div>🔭 <b>recon</b> — info gathering</div>
+          <div>📝 <b>reporting</b> — read only</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL: terminal -->
+    <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0">
+
+      <!-- Create/Join overlays -->
+      <div id="muxCreatePanel" class="card" style="display:${_mux.sid?'none':'block'}">
+        <div id="muxCreateForm">
+          <h3 style="margin:0 0 10px">New Session</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+            <input id="muxSessName" placeholder="Session name (e.g. pentest-lab-01)"
+              style="flex:2;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+            <input id="muxOwnerName" placeholder="Your name"
+              style="flex:1;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="muxCreate()">Create & Connect</button>
+            <button class="btn sec" onclick="document.getElementById('muxCreateForm').style.display='none';document.getElementById('muxJoinForm').style.display='block'">Join existing…</button>
+          </div>
+        </div>
+        <div id="muxJoinForm" style="display:none">
+          <h3 style="margin:0 0 10px">Join Session</h3>
+          <div style="display:grid;gap:8px;margin-bottom:10px">
+            <input id="muxJoinSid" placeholder="Session ID"
+              style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+            <input id="muxJoinName" placeholder="Your name"
+              style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+            <select id="muxJoinRole"
+              style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+              <option value="recon">🔭 recon — information gathering</option>
+              <option value="exploit">⚔️ exploit — offensive tools</option>
+              <option value="reporting">📝 reporting — read only</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="muxJoin()">Join</button>
+            <button class="btn sec" onclick="document.getElementById('muxJoinForm').style.display='none';document.getElementById('muxCreateForm').style.display='block'">← Back</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Terminal output -->
+      <div id="muxTermWrap" class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;${_mux.sid?'':'display:none !important'}">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg2)">
+          <div style="display:flex;gap:6px"><div style="width:10px;height:10px;border-radius:50%;background:#FF5F57"></div><div style="width:10px;height:10px;border-radius:50%;background:#FEBC2E"></div><div style="width:10px;height:10px;border-radius:50%;background:#28C840"></div></div>
+          <span style="font-size:12px;color:var(--muted);font-family:ui-monospace,monospace;flex:1">${_mux.sid||'no session'} — ${_mux.name||''} [${_mux.role||''}]</span>
+          <button onclick="muxClearScreen()" style="font-size:10px;padding:3px 8px;border-radius:5px;background:var(--bg);border:1px solid var(--border);color:var(--muted);cursor:pointer">clear</button>
+          <button onclick="muxDownloadLog()" style="font-size:10px;padding:3px 8px;border-radius:5px;background:var(--bg);border:1px solid var(--border);color:var(--muted);cursor:pointer">⬇ log</button>
+        </div>
+        <div id="muxOutput"
+          style="flex:1;padding:12px 14px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.5;overflow-y:auto;background:#0C0C10;color:#D4F5C4;min-height:300px;max-height:55vh;white-space:pre-wrap;word-break:break-all">
+          <span style="color:#666">NEXUS Terminal Mux — Collaborative shell. Type commands below.</span>
+        </div>
+        <div style="border-top:1px solid var(--border);padding:8px 10px;background:var(--bg2);display:flex;gap:6px;align-items:center">
+          <span id="muxPrompt" style="font-family:ui-monospace,monospace;font-size:12px;color:#28C840;white-space:nowrap">
+            ${_mux.role?`[${_mux.role}@nexus]$`:'>'}
+          </span>
+          <input id="muxInput" placeholder="${_mux.role==='reporting'?'read-only mode':'type command…'}"
+            ${_mux.role==='reporting'?'disabled':''} autocomplete="off" spellcheck="false"
+            style="flex:1;background:transparent;border:none;outline:none;font-family:ui-monospace,monospace;font-size:12px;color:#D4F5C4;caret-color:#28C840"
+            onkeydown="muxKeyDown(event)">
+          <button onclick="muxExec()"
+            style="padding:4px 12px;border-radius:6px;background:#28C840;border:none;color:#000;font-size:12px;font-weight:700;cursor:pointer;${_mux.role==='reporting'?'opacity:.4;pointer-events:none':''}">
+            ↵
+          </button>
+        </div>
+      </div>
+
+      <!-- Active sessions list -->
+      ${!_mux.sid&&sessions.length?`
+      <div class="card">
+        <h3 style="margin:0 0 8px;font-size:14px">Active Sessions (${sessions.length})</h3>
+        ${sessions.filter(s=>!s.expired).map(s=>`
+        <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:6px">
+          <div style="flex:1">
+            <div style="font-weight:600;font-size:13px">${esc(s.name)}</div>
+            <div style="font-size:11px;color:var(--muted)">${s.participants} participant${s.participants!==1?'s':''} · ${s.history_lines} lines</div>
+          </div>
+          <button class="btn sec" style="font-size:12px;padding:6px 10px"
+            onclick="document.getElementById('muxJoinSid').value='${esc(s.id)}';
+                     document.getElementById('muxJoinForm').style.display='block';
+                     document.getElementById('muxCreateForm').style.display='none'">Join</button>
+        </div>`).join('')}
+      </div>`:''}
+    </div>
+  </div>`;
+
+  if(_mux.sid){
+    muxRefreshParticipants();
+    muxConnect();
+    setTimeout(()=>{ const el=document.getElementById('muxInput'); if(el) el.focus(); },200);
+  }
+}
+
+/* ── Mux helpers ──────────────────────────────────────────────────────────── */
+function muxShowCreate(){ go('mux'); }
+function muxShowJoin(){ go('mux'); setTimeout(()=>{ document.getElementById('muxJoinForm').style.display='block'; document.getElementById('muxCreateForm').style.display='none'; },50); }
+
+async function muxCreate(){
+  const name=(document.getElementById('muxSessName')||{}).value?.trim()||'pentest-session';
+  const oname=(document.getElementById('muxOwnerName')||{}).value?.trim()||'owner';
+  const r=await (await fetch('/api/mux/sessions',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,owner_name:oname})})).json();
+  if(!r.ok){ toast('Error: '+(r.error||'failed')); return; }
+  _mux.sid=r.session_id; _mux.token=r.owner_token; _mux.role='owner';
+  _mux.name=oname; _mux.isOwner=true; _mux.ownerToken=r.owner_token;
+  toast('Session created'); loadMux();
+}
+
+async function muxJoin(){
+  const sid=(document.getElementById('muxJoinSid')||{}).value?.trim();
+  const name=(document.getElementById('muxJoinName')||{}).value?.trim()||'participant';
+  const role=(document.getElementById('muxJoinRole')||{}).value||'recon';
+  if(!sid){ toast('Enter session ID'); return; }
+  const r=await (await fetch(`/api/mux/sessions/${sid}/join`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({role,name})})).json();
+  if(!r.ok){ toast('Error: '+(r.error||'failed')); return; }
+  _mux.sid=r.session_id; _mux.token=r.token; _mux.role=r.role;
+  _mux.name=name; _mux.isOwner=false;
+  // Pre-load history
+  _mux.history=[];
+  const hist=r.history||[];
+  toast(`Joined as ${role}`); loadMux();
+  setTimeout(()=>{
+    const out=document.getElementById('muxOutput');
+    if(out&&hist.length){
+      hist.forEach(h=>{
+        if(h.cmd) muxAppend({type:'cmd_start',cmd:h.cmd,name:h.name,color:h.color,role:h.role});
+        if(h.output) h.output.split('\n').forEach(line=>muxAppend({type:'output',line,color:h.color}));
+      });
+    }
+  },200);
+}
+
+async function muxLeave(){
+  if(!_mux.sid) return;
+  await fetch(`/api/mux/sessions/${_mux.sid}/leave`,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({token:_mux.token})});
+  if(_mux.es){ _mux.es.close(); _mux.es=null; }
+  _mux={sid:null,token:null,role:null,name:null,isOwner:false,ownerToken:null,es:null,history:[],cmdHistory:[],cmdIdx:-1};
+  toast('Left session'); loadMux();
+}
+
+async function muxClose(){
+  if(!_mux.sid||!_mux.isOwner) return;
+  if(!confirm('Close session for everyone?')) return;
+  await fetch(`/api/mux/sessions/${_mux.sid}/close`,{method:'DELETE',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({owner_token:_mux.ownerToken})});
+  if(_mux.es){ _mux.es.close(); _mux.es=null; }
+  _mux={sid:null,token:null,role:null,name:null,isOwner:false,ownerToken:null,es:null,history:[],cmdHistory:[],cmdIdx:-1};
+  toast('Session closed'); loadMux();
+}
+
+function muxCopyLink(){
+  const url=location.origin+'/nexus/mux/join/'+_mux.sid;
+  copyText(url);
+}
+
+function muxConnect(){
+  if(_mux.es){ _mux.es.close(); _mux.es=null; }
+  const url=`/api/mux/sessions/${_mux.sid}/stream?token=${encodeURIComponent(_mux.token)}`;
+  const es=new EventSource(url);
+  _mux.es=es;
+  es.onmessage=e=>{
+    try { muxAppend(JSON.parse(e.data)); }
+    catch(_){}
+  };
+  es.onerror=()=>{ muxAppend({type:'system',message:'Connection interrupted — reconnecting…'}); };
+}
+
+function muxAppend(ev){
+  const out=document.getElementById('muxOutput'); if(!out) return;
+  let html='';
+  const col=ev.color||'#D4F5C4';
+  const name=ev.name?`<span style="color:${col};font-weight:600">[${esc(ev.name)}]</span> `:'';
+  switch(ev.type){
+    case 'connected':
+      html=`<div style="color:#666">── connected to session ${esc(ev.session)} ──</div>`; break;
+    case 'cmd_start':
+      html=`<div style="margin-top:6px">${name}<span style="color:${col}">$ ${esc(ev.cmd)}</span></div>`; break;
+    case 'output':
+      html=`<div style="color:#D4F5C4">${esc(ev.line)}</div>`; break;
+    case 'cmd_end':
+      html=`<div style="color:#666;font-size:11px">── [${esc(ev.name||'')}] exit ${ev.returncode} in ${ev.duration_ms}ms ──</div>`; break;
+    case 'timeout':
+      html=`<div style="color:#FF6B6B">⚠ Timeout after ${ev.timeout}s</div>`; break;
+    case 'denied':
+      html=`<div style="color:#FF6B6B">✕ Permission denied [${esc(ev.role)}]: ${esc(ev.reason)}</div>`; break;
+    case 'join':
+      html=`<div style="color:#666">── <span style="color:${ev.color}">${esc(ev.icon||'')} ${esc(ev.name)}</span> joined as ${esc(ev.role)} ──</div>`; break;
+    case 'leave':
+      html=`<div style="color:#666">── ${esc(ev.name)} left ──</div>`; break;
+    case 'system':
+      html=`<div style="color:#888;font-style:italic">── ${esc(ev.message||'')} ──</div>`; break;
+    case 'session_closed':
+      html=`<div style="color:#FF6B6B">── Session closed by owner ──</div>`;
+      if(_mux.es){ _mux.es.close(); _mux.es=null; } break;
+    case 'error':
+      html=`<div style="color:#FF6B6B">Error: ${esc(ev.message||ev.error||'')}</div>`; break;
+    default:
+      if(ev.message) html=`<div style="color:#888">${esc(ev.message)}</div>`; break;
+  }
+  if(html){ out.insertAdjacentHTML('beforeend',html); out.scrollTop=out.scrollHeight; }
+}
+
+async function muxExec(){
+  if(!_mux.sid||!_mux.token){ toast('Join a session first'); return; }
+  if(_mux.role==='reporting'){ toast('Read-only role — cannot execute commands'); return; }
+  const inp=document.getElementById('muxInput');
+  const cmd=inp?.value?.trim(); if(!cmd) return;
+  inp.value='';
+  // Command history
+  _mux.cmdHistory.unshift(cmd); if(_mux.cmdHistory.length>100) _mux.cmdHistory.pop();
+  _mux.cmdIdx=-1;
+  // Stream exec
+  try {
+    const r=await fetch(`/api/mux/sessions/${_mux.sid}/exec`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:_mux.token,cmd}),
+    });
+    const rd=r.body.getReader(); const dec=new TextDecoder();
+    while(true){
+      const {done,value}=await rd.read(); if(done) break;
+      dec.decode(value,{stream:true}).split('\n').filter(Boolean).forEach(line=>{
+        try { muxAppend(JSON.parse(line)); } catch(_){}
+      });
+    }
+  } catch(e){ muxAppend({type:'error',message:e.message}); }
+}
+
+function muxKeyDown(e){
+  if(e.key==='Enter'){ e.preventDefault(); muxExec(); return; }
+  if(e.key==='ArrowUp'){
+    e.preventDefault();
+    _mux.cmdIdx=Math.min(_mux.cmdIdx+1, _mux.cmdHistory.length-1);
+    const inp=document.getElementById('muxInput');
+    if(inp) inp.value=_mux.cmdHistory[_mux.cmdIdx]||'';
+    return;
+  }
+  if(e.key==='ArrowDown'){
+    e.preventDefault();
+    _mux.cmdIdx=Math.max(_mux.cmdIdx-1,-1);
+    const inp=document.getElementById('muxInput');
+    if(inp) inp.value=_mux.cmdIdx<0?'':_mux.cmdHistory[_mux.cmdIdx]||'';
+    return;
+  }
+  if(e.key==='l'&&e.ctrlKey){ e.preventDefault(); muxClearScreen(); }
+}
+
+function muxClearScreen(){
+  const out=document.getElementById('muxOutput'); if(out) out.innerHTML='';
+}
+
+function muxDownloadLog(){
+  const out=document.getElementById('muxOutput');
+  const txt=out?out.innerText:'';
+  const a=document.createElement('a');
+  a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(txt);
+  a.download='nexus-mux-'+Date.now()+'.txt'; a.click();
+}
+
+async function muxRefreshParticipants(){
+  const pl=document.getElementById('muxParticipants'); if(!pl) return;
+  try {
+    const r=await (await fetch(`/api/mux/sessions/${_mux.sid}`)).json();
+    const participants=(r.session?.participants||[]);
+    pl.innerHTML=participants.map(p=>`
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px">
+      <span style="color:${p.color}">${p.icon||'•'}</span>
+      <span style="font-weight:600;color:${p.color}">${esc(p.name)}</span>
+      <span style="color:var(--muted);font-size:10px">${esc(p.role)}</span>
+    </div>`).join('') || '<span style="font-size:12px;color:var(--muted)">Only you</span>';
+  } catch(e){ pl.textContent='Error loading participants'; }
+  // Auto-refresh every 10s
+  if(_mux.sid) setTimeout(muxRefreshParticipants, 10000);
 }
 
 /* ══════════════════════════════════════════════════════════════════
