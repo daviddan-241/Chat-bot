@@ -1655,6 +1655,238 @@ def api_skills_auto_learn():
             return jsonify({'ok': False, 'error': str(e2)}), 500
 
 
+# ── OLLAMA LOCAL AI ENDPOINTS ─────────────────────────────────────────────────
+@app.route('/api/ollama/status')
+def api_ollama_status():
+    try:
+        from agents.ollama_provider import is_available, list_models, OLLAMA_HOST
+        avail = is_available()
+        models = list_models() if avail else []
+        return jsonify({'ok': True, 'available': avail, 'host': OLLAMA_HOST,
+                        'models': models, 'model_count': len(models)})
+    except Exception as e:
+        return jsonify({'ok': False, 'available': False, 'error': str(e)})
+
+@app.route('/api/ollama/models')
+def api_ollama_models():
+    try:
+        from agents.ollama_provider import list_models
+        return jsonify({'ok': True, 'models': list_models()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/ollama/pull', methods=['POST'])
+def api_ollama_pull():
+    body  = request.get_json(force=True) or {}
+    model = body.get('model', '').strip()
+    if not model:
+        return jsonify({'ok': False, 'error': 'model required'}), 400
+    def _gen():
+        try:
+            from agents.ollama_provider import pull_model
+            for line in pull_model(model):
+                yield json.dumps({'status': line}) + '\n'
+            yield json.dumps({'status': 'done', 'ok': True}) + '\n'
+        except Exception as e:
+            yield json.dumps({'ok': False, 'error': str(e)}) + '\n'
+    return Response(stream_with_context(_gen()), content_type='application/x-ndjson')
+
+@app.route('/api/ollama/chat', methods=['POST'])
+def api_ollama_chat():
+    body     = request.get_json(force=True) or {}
+    messages = body.get('messages', [])
+    model    = body.get('model', '')
+    system   = body.get('system', None)
+    if not messages:
+        return jsonify({'ok': False, 'error': 'messages required'}), 400
+    def _gen():
+        try:
+            from agents.ollama_provider import chat_stream, DEFAULT_MODEL
+            for chunk in chat_stream(messages, model=model or DEFAULT_MODEL, system=system):
+                yield chunk
+        except Exception as e:
+            yield f'\n[Ollama error: {e}]'
+    return Response(stream_with_context(_gen()), content_type='text/plain; charset=utf-8')
+
+@app.route('/api/ollama/delete', methods=['DELETE'])
+def api_ollama_delete():
+    body  = request.get_json(force=True) or {}
+    model = body.get('model', '').strip()
+    if not model:
+        return jsonify({'ok': False, 'error': 'model required'}), 400
+    try:
+        import urllib.request as _ur
+        data = json.dumps({'name': model}).encode()
+        req  = _ur.Request(
+            f"{os.environ.get('OLLAMA_HOST','http://localhost:11434')}/api/delete",
+            data=data, method='DELETE',
+            headers={'Content-Type': 'application/json'})
+        with _ur.urlopen(req, timeout=10) as r:
+            return jsonify({'ok': True, 'status': r.status})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# ── RULES & BEHAVIOR EDITOR ───────────────────────────────────────────────────
+@app.route('/api/rules', methods=['GET', 'POST'])
+def api_rules():
+    try:
+        from db import get_rules_store
+        store = get_rules_store()
+    except Exception:
+        # Fallback to a simple JSON file
+        _rules_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nexus_rules.json')
+        class _SimpleStore:
+            def get(self, k, d=None):
+                try:
+                    if os.path.exists(_rules_file):
+                        return json.load(open(_rules_file)).get(k, d)
+                except Exception: pass
+                return d
+            def set(self, k, v):
+                try:
+                    data = {}
+                    if os.path.exists(_rules_file):
+                        data = json.load(open(_rules_file))
+                    data[k] = v
+                    json.dump(data, open(_rules_file, 'w'), indent=2)
+                except Exception: pass
+            def all(self):
+                try:
+                    if os.path.exists(_rules_file):
+                        return json.load(open(_rules_file))
+                except Exception: pass
+                return {}
+        store = _SimpleStore()
+
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'rules': store.all()})
+    body = request.get_json(force=True) or {}
+    for k, v in body.items():
+        store.set(k, v)
+    return jsonify({'ok': True, 'saved': list(body.keys())})
+
+
+# ── SCOPE MANAGEMENT ──────────────────────────────────────────────────────────
+_SCOPE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scope.txt')
+
+@app.route('/api/scope', methods=['GET', 'POST'])
+def api_scope():
+    if request.method == 'GET':
+        try:
+            if os.path.exists(_SCOPE_FILE):
+                with open(_SCOPE_FILE) as f:
+                    scope = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+            else:
+                scope = []
+        except Exception:
+            scope = []
+        return jsonify({'ok': True, 'scope': scope, 'scope_file': _SCOPE_FILE})
+    body  = request.get_json(force=True) or {}
+    scope = body.get('scope', [])
+    try:
+        with open(_SCOPE_FILE, 'w') as f:
+            f.write('\n'.join(scope))
+        return jsonify({'ok': True, 'scope': scope})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# ── AUTOMATED SECURITY WORKFLOW ───────────────────────────────────────────────
+@app.route('/api/workflow/start', methods=['POST'])
+def api_workflow_start():
+    body   = request.get_json(force=True) or {}
+    target = body.get('target', '').strip()
+    if not target:
+        return jsonify({'ok': False, 'error': 'target required'}), 400
+    def _gen():
+        try:
+            from modules.auto_workflow import run_workflow
+            for event in run_workflow(target):
+                yield json.dumps(event) + '\n'
+        except ImportError:
+            # Fallback: try from module_loader
+            tools = _get_extra_tools()
+            if 'run_security_workflow' in tools:
+                for event in tools['run_security_workflow'](target):
+                    yield json.dumps(event) + '\n'
+            else:
+                yield json.dumps({'type': 'error', 'message': 'auto_workflow module not loaded'}) + '\n'
+        except Exception as e:
+            yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
+    return Response(stream_with_context(_gen()), content_type='application/x-ndjson')
+
+
+# ── FILE ANALYSIS ─────────────────────────────────────────────────────────────
+@app.route('/api/analysis', methods=['POST'])
+def api_analysis():
+    if 'file' not in request.files:
+        return jsonify({'ok': False, 'error': 'No file uploaded'}), 400
+    f    = request.files['file']
+    fname = f.filename or 'upload'
+    tmp  = os.path.join(tempfile.gettempdir(), f'nexus_analysis_{uuid.uuid4().hex}_{fname}')
+    try:
+        f.save(tmp)
+        tools = _get_extra_tools()
+        if 'analyze_file' in tools:
+            result = tools['analyze_file'](tmp)
+        else:
+            try:
+                from modules.file_analyzer import analyze_file
+                result = analyze_file(tmp)
+            except ImportError:
+                result = {'ok': False, 'error': 'file_analyzer module not loaded'}
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    finally:
+        try: os.unlink(tmp)
+        except Exception: pass
+
+
+# ── SESSION SHARING ───────────────────────────────────────────────────────────
+_SESSIONS: dict = {}   # RAM-only sessions
+
+@app.route('/api/sessions', methods=['GET', 'POST'])
+def api_sessions():
+    if request.method == 'GET':
+        # Clean expired sessions
+        now = time.time()
+        expired = [sid for sid, s in _SESSIONS.items()
+                   if s.get('expires_at', 0) < now]
+        for sid in expired:
+            _SESSIONS.pop(sid, None)
+        return jsonify({'ok': True, 'sessions': list(_SESSIONS.values())})
+    body    = request.get_json(force=True) or {}
+    sid     = uuid.uuid4().hex
+    session_data = {
+        'id':         sid,
+        'role':       body.get('role', 'owner')[:50],
+        'note':       body.get('note', '')[:200],
+        'created':    time.time(),
+        'expires_at': time.time() + 3600,   # 60 min TTL
+        'status':     'active',
+        'link':       f'/nexus/join/{sid}',
+    }
+    _SESSIONS[sid] = session_data
+    return jsonify({'ok': True, 'session_id': sid, **session_data})
+
+@app.route('/api/sessions/<session_id>', methods=['DELETE'])
+def api_session_delete(session_id):
+    if session_id in _SESSIONS:
+        _SESSIONS.pop(session_id)
+        return jsonify({'ok': True})
+    return jsonify({'ok': False, 'error': 'Session not found'}), 404
+
+@app.route('/nexus/join/<session_id>')
+def session_join(session_id):
+    s = _SESSIONS.get(session_id)
+    if not s or s.get('expires_at', 0) < time.time():
+        return '<h2>Session not found or expired</h2>', 404
+    # Redirect to nexus with session context
+    return redirect(f'/nexus?session={session_id}')
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
