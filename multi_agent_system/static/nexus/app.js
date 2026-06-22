@@ -2490,7 +2490,32 @@ async function loadWorkflow(){
   </div>
   <div id="wfOutput" style="display:none" class="card">
     <div id="wfPhaseBar" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px"></div>
-    <div id="wfStream" style="background:#10100E;color:#D4F5C4;border-radius:12px;padding:14px;font-family:ui-monospace,monospace;font-size:12px;max-height:500px;overflow-y:auto;white-space:pre-wrap"></div>
+    <!-- Split: terminal left, live topology right -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:0">
+        <div id="wfStream" style="background:#10100E;color:#D4F5C4;border-radius:12px;padding:14px;font-family:ui-monospace,monospace;font-size:12px;height:420px;overflow-y:auto;white-space:pre-wrap"></div>
+      </div>
+      <!-- Live topology panel -->
+      <div style="width:320px;flex-shrink:0;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:12px;font-weight:700;color:var(--muted)">🗺️ LIVE TOPOLOGY</span>
+          <span id="wfTopoStats" style="font-size:11px;color:var(--muted)">waiting for scan…</span>
+        </div>
+        <div style="position:relative;background:#0C0C10;border-radius:12px;overflow:hidden;height:320px">
+          <canvas id="wfTopoCanvas" style="width:100%;height:100%;display:block;touch-action:none"></canvas>
+          <div id="wfTopoEmpty" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#333;pointer-events:none;font-size:12px;gap:6px">
+            <span style="font-size:28px">📡</span>
+            <span>Hosts appear here as nmap discovers them</span>
+          </div>
+        </div>
+        <div style="background:var(--bg2);border-radius:10px;padding:8px;font-size:11px;font-family:ui-monospace,monospace">
+          <div id="wfTopoLog" style="color:var(--muted);max-height:80px;overflow-y:auto;line-height:1.6">
+            — waiting —
+          </div>
+        </div>
+        <button class="btn sec" style="font-size:12px" onclick="go('topology')">Open Full Map →</button>
+      </div>
+    </div>
     <div style="margin-top:10px;display:flex;gap:8px">
       <button class="btn sec" onclick="downloadWfLog()">⬇ Download Report</button>
       <button class="btn sec" style="color:var(--error)" onclick="stopWorkflow()">■ Stop</button>
@@ -2509,18 +2534,136 @@ async function loadWorkflow(){
 }
 
 let _wfLog='', _wfAbort=null;
+
+/* ── Mini topology canvas bound to the workflow panel ── */
+function _wfTopoInit(target){
+  _topo.target = target;
+  _topo.nodes  = []; _topo.edges = [];
+  _topo.panX=0; _topo.panY=0; _topo.scale=1;
+  if(_topo.animFrame){ cancelAnimationFrame(_topo.animFrame); _topo.animFrame=null; }
+  const c=document.getElementById('wfTopoCanvas'); if(!c) return;
+  const dpr=window.devicePixelRatio||1;
+  function resize(){ const r=c.parentElement.getBoundingClientRect(); c.width=r.width*dpr; c.height=r.height*dpr; _wfTopoDraw(); }
+  new ResizeObserver(resize).observe(c.parentElement); resize();
+}
+
+function _wfTopoDraw(){
+  const c=document.getElementById('wfTopoCanvas'); if(!c||!_topo.nodes.length) return;
+  const ctx=c.getContext('2d'); const dpr=window.devicePixelRatio||1;
+  ctx.clearRect(0,0,c.width,c.height);
+  ctx.save(); ctx.scale(dpr,dpr);
+
+  // Auto-fit nodes into the mini canvas
+  const W=c.width/dpr, H=c.height/dpr;
+  const xs=_topo.nodes.map(n=>n.x), ys=_topo.nodes.map(n=>n.y);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const margin=32;
+  const sx=(W-margin*2)/((maxX-minX)||1), sy=(H-margin*2)/((maxY-minY)||1);
+  const s=Math.min(sx,sy,2.5);
+  const ox=W/2-((minX+maxX)/2)*s, oy=H/2-((minY+maxY)/2)*s;
+  ctx.translate(ox,oy); ctx.scale(s,s);
+
+  // Edges
+  for(const e of _topo.edges){
+    const src=_topo.nodes.find(n=>n.id===e.src), dst=_topo.nodes.find(n=>n.id===e.dst);
+    if(!src||!dst) continue;
+    ctx.beginPath(); ctx.moveTo(src.x,src.y); ctx.lineTo(dst.x,dst.y);
+    ctx.strokeStyle=e.type==='has_port'?'rgba(75,158,255,.35)':'rgba(245,158,11,.25)';
+    ctx.lineWidth=1; ctx.setLineDash(e.type==='runs'?[3,3]:[]); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // Nodes
+  for(const n of _topo.nodes){
+    const r=(NODE_R[n.type]||12)*0.8;
+    const col=NODE_COLOR[n.type]||'#888';
+    ctx.beginPath(); ctx.arc(n.x,n.y,r,0,Math.PI*2);
+    ctx.fillStyle=col+'CC'; ctx.fill();
+    ctx.strokeStyle=col+'66'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle='#ccc'; ctx.font=`${n.type==='host'?10:8}px ui-monospace,monospace`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    const lbl=n.label.length>10?n.label.slice(0,9)+'…':n.label;
+    ctx.fillText(lbl, n.x, n.y+r+8);
+    if(n.type==='host'){ ctx.fillStyle='#fff'; ctx.font='bold 8px monospace'; ctx.fillText('H',n.x,n.y); }
+    else if(n.type==='port'){ ctx.fillStyle='#fff'; ctx.font='6px monospace'; ctx.fillText(':'+n.port,n.x,n.y); }
+  }
+  ctx.restore();
+}
+
+function _wfTopoUpdate(graph){
+  if(!graph) return;
+  // Merge into shared _topo state (same as full topology tab)
+  const existing={}; _topo.nodes.forEach(n=>existing[n.id]=n);
+  _topo.nodes=graph.nodes.map(gn=>{
+    const ex=existing[gn.id];
+    return ex?{...ex,...gn}:{...gn, x:Math.random()*260+30, y:Math.random()*200+30, vx:0, vy:0};
+  });
+  _topo.edges=graph.edges;
+  _topo.graph=graph;
+  // Kick physics if not running
+  if(!_topo.animFrame){
+    _topo.animFrame=requestAnimationFrame(function loop(){
+      if(!document.getElementById('wfTopoCanvas')&&!document.getElementById('topoCanvas')){ _topo.animFrame=null; return; }
+      const nodes=_topo.nodes, edges=_topo.edges;
+      const k=70, gravity=0.025, damping=0.8;
+      for(let i=0;i<nodes.length;i++){
+        const a=nodes[i]; if(!a.vx) a.vx=0; if(!a.vy) a.vy=0;
+        a.vx+=-gravity*a.x; a.vy+=-gravity*a.y;
+        for(let j=i+1;j<nodes.length;j++){
+          const b=nodes[j]; if(!b.vx) b.vx=0; if(!b.vy) b.vy=0;
+          const dx=b.x-a.x, dy=b.y-a.y, d=Math.max(Math.hypot(dx,dy),1);
+          const f=k*k/(d*d)*Math.min(d/10,1);
+          a.vx-=dx/d*f; a.vy-=dy/d*f; b.vx+=dx/d*f; b.vy+=dy/d*f;
+        }
+        for(const e of edges){
+          const src=nodes.find(n=>n.id===e.src), dst=nodes.find(n=>n.id===e.dst);
+          if(!src||!dst) continue;
+          const dx=dst.x-src.x, dy=dst.y-src.y, d=Math.max(Math.hypot(dx,dy),1);
+          const td=e.type==='has_port'?55:85, f=(d-td)*0.025;
+          src.vx+=dx/d*f; src.vy+=dy/d*f; dst.vx-=dx/d*f; dst.vy-=dy/d*f;
+        }
+      }
+      for(const n of nodes){ n.vx*=damping; n.vy*=damping; n.x+=n.vx; n.y+=n.vy; }
+      _wfTopoDraw();
+      // Also refresh full topology tab if open
+      if(document.getElementById('topoCanvas')) topoDraw();
+      _topo.animFrame=requestAnimationFrame(loop);
+    });
+  }
+  // Update stats + log
+  const s=graph.stats||{};
+  const statsEl=document.getElementById('wfTopoStats');
+  if(statsEl) statsEl.textContent=`${s.hosts||0} hosts · ${s.ports||0} ports · ${s.services||0} svcs`;
+  const logEl=document.getElementById('wfTopoLog');
+  if(logEl){
+    const newHosts=graph.nodes.filter(n=>n.type==='host').map(n=>n.label).join(', ');
+    logEl.innerHTML+=`<div style="color:var(--success)">+${newHosts||'update'}</div>`;
+    logEl.scrollTop=logEl.scrollHeight;
+  }
+  const empty=document.getElementById('wfTopoEmpty');
+  if(empty&&_topo.nodes.length) empty.style.display='none';
+}
+
 async function startWorkflow(){
   const target=(document.getElementById('wfTarget')||{}).value?.trim();
   if(!target){ toast('Enter a target'); return; }
+
   document.getElementById('wfOutput').style.display='block';
   const stream=document.getElementById('wfStream');
   const phases=document.getElementById('wfPhaseBar');
   _wfLog=''; stream.textContent='';
   phases.innerHTML='';
+
   const PHASE_NAMES=['1:Discovery','2:Enumeration','3:Vuln ID','4:Validation','5:SSL/TLS','6:DNS','7:Headers','8:Report'];
   phases.innerHTML=PHASE_NAMES.map((n,i)=>`<span id="wfph-${i+1}" style="padding:4px 8px;border-radius:6px;background:var(--bg2);font-size:11px;border:1px solid var(--border)">${n}</span>`).join('');
+
+  // Initialise the mini topology canvas
+  setTimeout(()=>_wfTopoInit(target), 100);
+
   try {
-    const r=await fetch('/api/workflow/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target})});
+    const r=await fetch('/api/workflow/start',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({target})
+    });
     const rd=r.body.getReader(); const dec=new TextDecoder();
     while(true){
       const {done,value}=await rd.read(); if(done) break;
@@ -2529,22 +2672,36 @@ async function startWorkflow(){
         if(!line.trim()) continue;
         try {
           const obj=JSON.parse(line);
-          if(obj.type==='error'){ stream.textContent+='\n❌ '+obj.message; break; }
+
+          if(obj.type==='error'){
+            stream.textContent+='\n❌ '+obj.message;
+          }
           if(obj.type==='phase_start'){
             const ph=document.getElementById('wfph-'+obj.phase);
-            if(ph) ph.style.background='var(--accent)'; if(ph) ph.style.color='#fff';
+            if(ph){ ph.style.background='var(--accent)'; ph.style.color='#fff'; }
             stream.textContent+=`\n${'─'.repeat(50)}\n▶ Phase ${obj.phase}: ${obj.name}\n   ${obj.desc}\n`;
           }
-          if(obj.type==='cmd_start') stream.textContent+=`\n$ ${obj.cmd}\n`;
-          if(obj.type==='cmd_result'){ stream.textContent+=obj.output+'\n'; }
+          if(obj.type==='cmd_start'){
+            stream.textContent+=`\n$ ${obj.cmd}\n`;
+          }
+          if(obj.type==='cmd_result'){
+            stream.textContent+=obj.output+'\n';
+          }
+          if(obj.type==='topology_update'){
+            // 🗺️ Live graph update — no copy-paste needed
+            _wfTopoUpdate(obj.graph);
+            stream.textContent+=`🗺️ Topology: ${obj.graph?.stats?.hosts||0} hosts, ${obj.graph?.stats?.ports||0} ports discovered\n`;
+          }
           if(obj.type==='phase_done'){
             const ph=document.getElementById('wfph-'+obj.phase);
             if(ph){ ph.style.background='var(--success)'; ph.style.color='#fff'; }
           }
           if(obj.type==='complete'){
             stream.textContent+=`\n${'═'.repeat(50)}\n✅ Assessment complete in ${obj.duration_s}s — ${obj.phases_done} phases\n`;
+            const s=document.getElementById('wfTopoStats');
+            if(s) s.textContent+=' · scan done ✅';
           }
-        } catch { stream.textContent+=line+'\n'; }
+        } catch(_){ stream.textContent+=line+'\n'; }
         _wfLog=stream.textContent;
         stream.scrollTop=stream.scrollHeight;
       }
