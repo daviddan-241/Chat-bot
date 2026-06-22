@@ -1887,6 +1887,117 @@ def session_join(session_id):
     return redirect(f'/nexus?session={session_id}')
 
 
+# ── TERMINAL MULTIPLEXER ──────────────────────────────────────────────────────
+@app.route('/api/mux/sessions', methods=['GET'])
+def api_mux_list():
+    from modules.terminal_mux import list_sessions
+    return jsonify({'ok': True, 'sessions': list_sessions()})
+
+@app.route('/api/mux/sessions', methods=['POST'])
+def api_mux_create():
+    body = request.get_json(force=True) or {}
+    name = body.get('name', 'Session').strip()[:80]
+    owner_name = body.get('owner_name', 'owner').strip()[:30]
+    from modules.terminal_mux import create_session
+    result = create_session(name, owner_name)
+    return jsonify({'ok': True, **result})
+
+@app.route('/api/mux/sessions/<sid>/join', methods=['POST'])
+def api_mux_join(sid):
+    body  = request.get_json(force=True) or {}
+    role  = body.get('role', 'recon').strip()
+    name  = body.get('name', 'participant').strip()[:30]
+    from modules.terminal_mux import join_session
+    return jsonify(join_session(sid, role, name))
+
+@app.route('/api/mux/sessions/<sid>/leave', methods=['POST'])
+def api_mux_leave(sid):
+    body  = request.get_json(force=True) or {}
+    token = body.get('token', '').strip()
+    from modules.terminal_mux import leave_session
+    return jsonify(leave_session(sid, token))
+
+@app.route('/api/mux/sessions/<sid>', methods=['GET'])
+def api_mux_session(sid):
+    from modules.terminal_mux import get_session
+    s = get_session(sid)
+    if not s:
+        return jsonify({'ok': False, 'error': 'Session not found'}), 404
+    return jsonify({'ok': True, 'session': s})
+
+@app.route('/api/mux/sessions/<sid>/close', methods=['DELETE'])
+def api_mux_close(sid):
+    body  = request.get_json(force=True) or {}
+    token = body.get('owner_token', '').strip()
+    from modules.terminal_mux import close_session
+    return jsonify(close_session(sid, token))
+
+@app.route('/api/mux/sessions/<sid>/exec', methods=['POST'])
+def api_mux_exec(sid):
+    body    = request.get_json(force=True) or {}
+    token   = body.get('token', '').strip()
+    cmd     = body.get('cmd', '').strip()
+    timeout = min(int(body.get('timeout', 60)), 300)
+    if not token or not cmd:
+        return jsonify({'ok': False, 'error': 'token and cmd required'}), 400
+    def _gen():
+        from modules.terminal_mux import execute_command
+        for ev in execute_command(sid, token, cmd, timeout=timeout):
+            yield json.dumps(ev) + '\n'
+    return Response(stream_with_context(_gen()), content_type='application/x-ndjson',
+                    headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
+
+@app.route('/api/mux/sessions/<sid>/stream')
+def api_mux_stream(sid):
+    token = request.args.get('token', '').strip()
+    if not token:
+        return jsonify({'ok': False, 'error': 'token required'}), 400
+    from modules.terminal_mux import subscribe, unsubscribe
+    q, err = subscribe(sid, token)
+    if not q:
+        return jsonify({'ok': False, 'error': err}), 403
+    def _gen():
+        try:
+            yield f"data: {json.dumps({'type':'connected','session':sid})}\n\n"
+            while True:
+                try:
+                    ev = q.get(timeout=25)
+                    if ev is None:
+                        yield f"data: {json.dumps({'type':'session_closed'})}\n\n"
+                        break
+                    yield f"data: {json.dumps(ev)}\n\n"
+                except Exception:
+                    yield ": heartbeat\n\n"
+        finally:
+            unsubscribe(sid, token)
+    return Response(stream_with_context(_gen()), content_type='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+@app.route('/api/mux/sessions/<sid>/history')
+def api_mux_history(sid):
+    limit = min(int(request.args.get('limit', 200)), 2000)
+    from modules.terminal_mux import session_history
+    return jsonify({'ok': True, 'history': session_history(sid, limit)})
+
+@app.route('/api/mux/roles')
+def api_mux_roles():
+    from modules.terminal_mux import ROLES, ROLE_COLORS, ROLE_ICONS, _RECON_ALLOW
+    return jsonify({'ok': True, 'roles': [
+        {'id': r, 'color': ROLE_COLORS[r], 'icon': ROLE_ICONS[r],
+         'can_exec': r != 'reporting',
+         'tools': sorted(_RECON_ALLOW) if r == 'recon' else (['all tools'] if r in ('owner','exploit') else [])}
+        for r in ROLES
+    ]})
+
+@app.route('/nexus/mux/join/<sid>')
+def mux_join_page(sid):
+    from modules.terminal_mux import get_session
+    s = get_session(sid)
+    if not s:
+        return '<h2>Session not found or expired</h2>', 404
+    return redirect(f'/nexus?view=mux&sid={sid}')
+
+
 # ── AGENT LIBRARY — 136 specialised agents from agents/**/*.md ───────────────
 @app.route('/api/agents/library')
 def api_agents_library():
