@@ -1887,6 +1887,91 @@ def session_join(session_id):
     return redirect(f'/nexus?session={session_id}')
 
 
+# ── AGENT LIBRARY — 136 specialised agents from agents/**/*.md ───────────────
+@app.route('/api/agents/library')
+def api_agents_library():
+    try:
+        from modules.agent_library import load_all
+        agents = load_all()
+        # Strip full system_prompt for list view (too large)
+        slim = [{k: v for k, v in a.items() if k not in ('system_prompt', 'path')}
+                for a in agents]
+        return jsonify({'ok': True, 'agents': slim, 'total': len(slim)})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/agents/library/<path:agent_id>')
+def api_agent_detail(agent_id):
+    try:
+        from modules.agent_library import get_agent
+        a = get_agent(agent_id)
+        if not a:
+            return jsonify({'ok': False, 'error': 'Agent not found'}), 404
+        return jsonify({'ok': True, 'agent': {k: v for k, v in a.items() if k != 'path'}})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/agents/categories')
+def api_agents_categories():
+    try:
+        from modules.agent_library import get_categories
+        return jsonify({'ok': True, 'categories': get_categories()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/agents/search')
+def api_agents_search():
+    q   = request.args.get('q', '').strip()
+    cat = request.args.get('cat', '').strip()
+    try:
+        from modules.agent_library import search_agents
+        results = search_agents(q, cat)
+        slim = [{k: v for k, v in a.items() if k not in ('system_prompt', 'path')}
+                for a in results]
+        return jsonify({'ok': True, 'agents': slim, 'total': len(slim), 'query': q})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/agents/invoke', methods=['POST'])
+def api_agents_invoke():
+    body      = request.get_json(force=True) or {}
+    agent_id  = body.get('agent_id', '').strip()
+    message   = body.get('message', '').strip()
+    model     = body.get('model', '')
+    stream    = body.get('stream', False)
+    if not agent_id or not message:
+        return jsonify({'ok': False, 'error': 'agent_id and message required'}), 400
+    try:
+        from modules.agent_library import get_agent
+        from agents.ollama_provider import chat_stream, chat, DEFAULT_MODEL, is_available
+        agent = get_agent(agent_id)
+        if not agent:
+            return jsonify({'ok': False, 'error': f'Agent not found: {agent_id}'}), 404
+        if not is_available():
+            return jsonify({'ok': False, 'error': 'Ollama not running — cannot invoke agent'}), 503
+        m = model or DEFAULT_MODEL
+        messages = [{'role': 'user', 'content': message}]
+        if stream:
+            def _gen():
+                for chunk in chat_stream(messages, model=m, system=agent['system_prompt']):
+                    yield chunk
+            return Response(stream_with_context(_gen()), content_type='text/plain; charset=utf-8')
+        response = chat(messages, model=m, system=agent['system_prompt'])
+        return jsonify({'ok': True, 'agent': agent_id, 'agent_name': agent['name'],
+                        'model_used': m, 'response': response})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/agents/reload', methods=['POST'])
+def api_agents_reload():
+    try:
+        from modules.agent_library import load_all
+        agents = load_all(force=True)
+        return jsonify({'ok': True, 'total': len(agents)})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 # ── EDR VALIDATOR ─────────────────────────────────────────────────────────────
 @app.route('/api/edr/run', methods=['POST'])
 def api_edr_run():
