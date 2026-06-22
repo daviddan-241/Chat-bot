@@ -1887,6 +1887,54 @@ def session_join(session_id):
     return redirect(f'/nexus?session={session_id}')
 
 
+# ── NETWORK TOPOLOGY MAPPER ───────────────────────────────────────────────────
+@app.route('/api/topology')
+def api_topology_list():
+    try:
+        from modules.topology_mapper import list_graphs
+        return jsonify({'ok': True, 'graphs': list_graphs()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/topology/<path:target_id>')
+def api_topology_get(target_id):
+    try:
+        from modules.topology_mapper import get
+        g = get(target_id)
+        if not g:
+            return jsonify({'ok': False, 'error': 'No topology for this target'}), 404
+        return jsonify({'ok': True, 'graph': g})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/topology/<path:target_id>/clear', methods=['POST'])
+def api_topology_clear(target_id):
+    try:
+        from modules.topology_mapper import clear
+        clear(target_id)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/topology/ingest', methods=['POST'])
+def api_topology_ingest():
+    body   = request.get_json(force=True) or {}
+    target = body.get('target', '').strip()
+    tool   = body.get('tool', 'scan')
+    output = body.get('output', '')
+    if not target or not output:
+        return jsonify({'ok': False, 'error': 'target and output required'}), 400
+    try:
+        from modules.topology_mapper import parse_nmap, parse_generic
+        if 'nmap' in tool.lower():
+            g = parse_nmap(target, output)
+        else:
+            g = parse_generic(target, tool, output)
+        return jsonify({'ok': True, 'graph': g})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 # ── TERMINAL MULTIPLEXER ──────────────────────────────────────────────────────
 @app.route('/api/mux/sessions', methods=['GET'])
 def api_mux_list():
