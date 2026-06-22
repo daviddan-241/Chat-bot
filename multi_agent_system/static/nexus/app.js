@@ -829,42 +829,166 @@ async function doDeploy(target){
 /* ──────────────────────────────────────────────────────────────────
    SKILLS LIBRARY
    ────────────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   SKILLS LIBRARY — 136 specialised agent system prompts
+   Browse, search, load as active AI persona, or invoke directly
+   ══════════════════════════════════════════════════════════════════ */
+let _allAgents=[], _agentFilter='', _agentCat='', _activeAgent=null;
+
 async function loadSkills(){
   const g=document.getElementById('view-generic'); g.classList.add('active');
   const wrap=g.querySelector('.wrap');
-  wrap.innerHTML=`<div class="card"><h3>Skills Library</h3>
-    <p style="color:var(--text2);font-size:14px">Upload PDF, TXT, DOCX, ZIP, image, audio or video. NEXUS distills it into reusable methods, frameworks & best-practices that agents apply automatically.</p>
-    <div class="drop" id="drop" onclick="document.getElementById('skillInput').click()">
-      <div style="font-size:32px">📥</div><b>Tap to upload</b><div style="font-size:13px">or drop a file here</div></div>
-    <div id="skillMsg" style="margin-top:10px;font-size:13px;color:var(--text2)"></div>
-  </div><div id="skillList"></div>`;
-  const drop=document.getElementById('drop');
-  ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
-  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
-  drop.addEventListener('drop',e=>{ if(e.dataTransfer.files[0]) uploadSkill(e.dataTransfer.files[0]); });
-  renderSkillList();
+  wrap.innerHTML=`<div class="card"><div class="spinner"></div> Loading agent library…</div>`;
+  let cats=[], agents=[];
+  try {
+    const [cr, ar] = await Promise.all([
+      fetch('/api/agents/categories').then(r=>r.json()),
+      fetch('/api/agents/library').then(r=>r.json()),
+    ]);
+    cats   = cr.categories||[];
+    agents = ar.agents||[];
+    _allAgents = agents;
+  } catch(e){ wrap.innerHTML=`<div class="card"><span style="color:var(--error)">Failed to load agents: ${esc(e.message)}</span></div>`; return; }
+
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1">
+        <h3 style="margin:0 0 4px">📚 Agent Library</h3>
+        <p style="color:var(--text2);font-size:13px;margin:0">
+          ${agents.length} specialised agents. Load any as active AI persona for Ollama chat,
+          or invoke directly with a message.
+        </p>
+      </div>
+      <button class="btn sec" onclick="fetch('/api/agents/reload',{method:'POST'}).then(()=>loadSkills())">⟳ Reload</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <input id="agentSearch" placeholder="Search agents…" value="${esc(_agentFilter)}"
+        style="flex:1;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px"
+        oninput="_agentFilter=this.value;renderAgentGrid()">
+      <select id="agentCatFilter"
+        style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px"
+        onchange="_agentCat=this.value;renderAgentGrid()">
+        <option value="">All categories</option>
+        ${cats.map(c=>`<option value="${esc(c.id)}" ${_agentCat===c.id?'selected':''}>${esc(c.name)} (${c.count})</option>`).join('')}
+      </select>
+    </div>
+  </div>
+
+  ${_activeAgent?`
+  <div class="card" id="agentInvokeCard" style="margin-bottom:10px;border:1px solid var(--accent)">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="font-size:20px">🤖</span>
+      <div style="flex:1">
+        <div style="font-weight:700">${esc(_activeAgent.name)}</div>
+        <div style="font-size:12px;color:var(--muted)">${esc(_activeAgent.category)} · model: ${esc(_activeAgent.model)}</div>
+      </div>
+      <button class="btn sec" onclick="_activeAgent=null;loadSkills()">✕ Deactivate</button>
+    </div>
+    <div id="agentInvokeHistory" style="min-height:60px;max-height:280px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:10px;font-size:13px;margin-bottom:8px;white-space:pre-wrap"></div>
+    <div style="display:flex;gap:8px">
+      <textarea id="agentInvokeMsg" rows="2" placeholder="Send a message to this agent…"
+        style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;resize:none"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAgentMsg();}"></textarea>
+      <button class="btn" onclick="sendAgentMsg()">Send</button>
+    </div>
+  </div>`:''}
+
+  <div id="agentGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px"></div>`;
+
+  renderAgentGrid();
 }
-async function renderSkillList(){
-  const j=await (await fetch(`${API}/skills`)).json();
-  const list=document.getElementById('skillList'); if(!list) return;
-  list.innerHTML = j.skills.length ? j.skills.map(s=>`<div class="skill">
-    <div class="st">📚 ${esc(s.title||s.filename)} <span style="color:var(--muted);font-size:12px">(${s.kind})</span></div>
-    <div style="color:var(--text2);font-size:13px;margin-top:4px">${esc(s.summary||'')}</div>
-    <div class="chips">${[...(s.methods||[]),...(s.frameworks||[]),...(s.best_practices||[])].slice(0,6).map(c=>`<span class="chip">${esc(c)}</span>`).join('')}</div>
-    <button class="btn sec" style="margin-top:8px;padding:6px 12px;font-size:12px" onclick="delSkill('${s.id}')">Remove</button>
-  </div>`).join('') : '<div class="empty" style="padding:30px"><p style="color:var(--text2)">No skills yet.</p></div>';
+
+function renderAgentGrid(){
+  const grid=document.getElementById('agentGrid'); if(!grid) return;
+  const q=(_agentFilter||'').toLowerCase();
+  const cat=(_agentCat||'').toLowerCase();
+  let filtered=_allAgents.filter(a=>{
+    const catOk=!cat||a.category_id===cat;
+    const qOk=!q||a.name.toLowerCase().includes(q)||a.description.toLowerCase().includes(q);
+    return catOk&&qOk;
+  });
+  if(!filtered.length){ grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:30px">No agents match — try a different search.</div>`; return; }
+  const CAT_COLORS={'Business Product':'#8B5CF6','Core Development':'#2196F3','Data Ai':'#00BCD4',
+    'Developer Experience':'#4CAF50','Infrastructure':'#FF9800','Language Experts':'#E91E63',
+    'Orchestration':'#9C27B0','Quality Assurance':'#F44336','Research Analysis':'#607D8B','Specialized Domains':'#795548'};
+  grid.innerHTML=filtered.map(a=>{
+    const isActive=_activeAgent?.id===a.id;
+    const color=CAT_COLORS[a.category]||'var(--accent)';
+    return `<div onclick="openAgent('${esc(a.id)}')"
+      style="border:1px solid ${isActive?'var(--accent)':' var(--border)'};border-radius:14px;padding:14px;cursor:pointer;
+             transition:.15s;background:${isActive?'var(--accent-light)':'var(--bg)'}"
+      onmouseover="this.style.background='var(--bg2)';this.style.borderColor='${color}'"
+      onmouseout="this.style.background='${isActive?'var(--accent-light)':'var(--bg)'};this.style.borderColor='${isActive?'var(--accent)':'var(--border)'}'">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:16px">🤖</span>
+        <b style="font-size:13px;flex:1">${esc(a.name)}</b>
+        ${isActive?`<span style="font-size:10px;background:var(--accent);color:#fff;padding:2px 6px;border-radius:4px">active</span>`:''}
+      </div>
+      <div style="font-size:11px;color:${color};margin-bottom:5px;font-weight:600">${esc(a.category)}</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(a.description)}</div>
+      <div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap">
+        ${a.model&&a.model!=='any'?`<span style="font-size:10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${esc(a.model)}</span>`:''}
+        <span style="font-size:10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 6px">${a.prompt_length} chars</span>
+      </div>
+    </div>`;
+  }).join('');
 }
+
+async function openAgent(id){
+  const r=await (await fetch('/api/agents/library/'+encodeURIComponent(id))).json();
+  if(!r.ok){ toast('Error: '+(r.error||'not found')); return; }
+  const a=r.agent;
+  _activeAgent=a;
+  loadSkills();
+  setTimeout(()=>{
+    const el=document.getElementById('agentInvokeCard');
+    if(el) el.scrollIntoView({behavior:'smooth'});
+  },100);
+}
+
+let _agentHistory=[];
+async function sendAgentMsg(){
+  if(!_activeAgent){ toast('Select an agent first'); return; }
+  const inp=document.getElementById('agentInvokeMsg');
+  const msg=inp?.value?.trim(); if(!msg) return;
+  inp.value='';
+  _agentHistory.push({role:'user',content:msg});
+  const hist=document.getElementById('agentInvokeHistory');
+  if(hist) hist.innerHTML=_agentHistory.map(m=>
+    `<div style="margin-bottom:8px"><b style="color:${m.role==='user'?'var(--accent)':'var(--text2)'}">${m.role==='user'?'You':_activeAgent.name}:</b> ${esc(m.content)}</div>`
+  ).join('')+'<div id="agentStream" style="color:var(--text2)"><span class="spinner"></span></div>';
+  if(hist) hist.scrollTop=hist.scrollHeight;
+  try {
+    const r=await fetch('/api/agents/invoke',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({agent_id:_activeAgent.id,message:msg,stream:true})});
+    const rd=r.body.getReader(); const dec=new TextDecoder(); let reply='';
+    const streamEl=document.getElementById('agentStream');
+    while(true){
+      const {done,value}=await rd.read(); if(done) break;
+      reply+=dec.decode(value,{stream:true});
+      if(streamEl) streamEl.textContent=reply;
+      if(hist) hist.scrollTop=hist.scrollHeight;
+    }
+    _agentHistory.push({role:'assistant',content:reply});
+    if(hist) hist.innerHTML=_agentHistory.map(m=>
+      `<div style="margin-bottom:8px"><b style="color:${m.role==='user'?'var(--accent)':'var(--text2)'}">${m.role==='user'?'You':_activeAgent.name}:</b> <span style="white-space:pre-wrap">${esc(m.content)}</span></div>`
+    ).join('');
+    if(hist) hist.scrollTop=hist.scrollHeight;
+  } catch(e){ const s=document.getElementById('agentStream'); if(s) s.innerHTML=`<span style="color:var(--error)">${esc(e.message)}</span>`; }
+}
+
+/* legacy skill upload — kept for backward compat */
 function onSkillFile(inp){ if(inp.files[0]) uploadSkill(inp.files[0]); inp.value=''; }
 async function uploadSkill(file){
-  const msg=document.getElementById('skillMsg'); if(msg) msg.textContent='Extracting & distilling '+file.name+'…';
   const fd=new FormData(); fd.append('file',file); fd.append('project_id','global');
   try{
     const r=await (await fetch(`${API}/skills/upload`,{method:'POST',body:fd})).json();
-    if(r.ok){ if(msg) msg.innerHTML='<span style="color:var(--success)">✅ Learned: '+esc(r.skill.title)+'</span>'; toast('Skill learned'); renderSkillList(); }
-    else if(msg) msg.innerHTML='<span style="color:var(--error)">⚠️ '+esc(r.error)+'</span>';
-  }catch(e){ if(msg) msg.textContent='Error: '+e.message; }
+    if(r.ok) toast('Skill learned: '+r.skill?.title);
+    else toast('Upload error: '+(r.error||'failed'));
+  }catch(e){ toast('Error: '+e.message); }
 }
-async function delSkill(id){ await fetch(`${API}/skills/${id}`,{method:'DELETE'}); toast('Removed'); renderSkillList(); }
+async function delSkill(id){ await fetch(`${API}/skills/${id}`,{method:'DELETE'}); toast('Removed'); }
 
 /* ══════════════════════════════════════════════════════════════════
    CRYPTO WALLET
