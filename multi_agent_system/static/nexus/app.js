@@ -17,6 +17,7 @@ const NAV = [
   {sec:'Collaboration'},
   {id:'mux',       ico:'🖥️', label:'Terminal Mux'},
   {sec:'Security'},
+  {id:'topology',  ico:'🗺️', label:'Network Topology'},
   {id:'workflow',  ico:'⚡', label:'Auto Workflow'},
   {id:'testplans', ico:'🗂️', label:'Test Plans'},
   {id:'analysis',  ico:'🔬', label:'File Analysis'},
@@ -70,10 +71,14 @@ function go(id){
   });
   document.getElementById('view-generic').classList.remove('active');
   document.getElementById('inputbar').style.display = (id==='chat')?'block':'none';
-
   document.getElementById('fab').style.display = (id==='chat')?'grid':'none';
+  // sync bottom nav
+  document.querySelectorAll('.bn-item').forEach(el=>el.classList.remove('active'));
+  const bn=document.getElementById('bn-'+id); if(bn) bn.classList.add('active');
+
   const GENERIC_VIEWS = ['chat','agents','connectors','settings','artifacts','skills','deployments',
-    'projects','history','wallet','testplans','models','workflow','analysis','rules','sessions'];
+    'projects','history','wallet','testplans','models','workflow','analysis','rules','sessions',
+    'topology','mux','edr','torctl','jobs','secdelete'];
   if(GENERIC_VIEWS.includes(id)){
     if(id==='skills')      { document.getElementById('view-generic').classList.add('active'); loadSkills(); }
     else if(id==='deployments'){ document.getElementById('view-generic').classList.add('active'); loadDeployments(); }
@@ -83,6 +88,7 @@ function go(id){
     else if(id==='mux')        { document.getElementById('view-generic').classList.add('active'); loadMux(); }
     else if(id==='models')     { document.getElementById('view-generic').classList.add('active'); loadModels(); }
     else if(id==='workflow')   { document.getElementById('view-generic').classList.add('active'); loadWorkflow(); }
+    else if(id==='topology')   { document.getElementById('view-generic').classList.add('active'); loadTopology(); }
     else if(id==='edr')        { document.getElementById('view-generic').classList.add('active'); loadEdr(); }
     else if(id==='torctl')     { document.getElementById('view-generic').classList.add('active'); loadTorManager(); }
     else if(id==='jobs')       { document.getElementById('view-generic').classList.add('active'); loadJobs(); }
@@ -992,6 +998,405 @@ async function uploadSkill(file){
   }catch(e){ toast('Error: '+e.message); }
 }
 async function delSkill(id){ await fetch(`${API}/skills/${id}`,{method:'DELETE'}); toast('Removed'); }
+
+/* ══════════════════════════════════════════════════════════════════
+   ASK CARDS — Styled clarification / confirmation UI
+   Usage:  const answer = await nexusAsk({...config})
+   Types:  choice | yesno | text | multi
+   ══════════════════════════════════════════════════════════════════ */
+let _askQueue = [];
+let _askActive = false;
+
+/**
+ * nexusAsk({
+ *   icon:    '🎯',
+ *   title:   'Confirm target',
+ *   sub:     'Which host should the scan run against?',
+ *   type:    'choice',                  // choice | yesno | text | multi
+ *   options: ['192.168.1.1', 'other'],  // for choice / multi
+ *   placeholder: '10.0.0.1',           // for text
+ *   cancelable: true,                   // show cancel
+ * })
+ * Returns: chosen string | true/false | string (text) | string[] (multi)
+ */
+function nexusAsk(cfg){
+  return new Promise(resolve=>{
+    _askQueue.push({cfg, resolve});
+    if(!_askActive) _askNext();
+  });
+}
+
+function _askNext(){
+  if(!_askQueue.length){ _askActive=false; return; }
+  _askActive=true;
+  const {cfg,resolve}=_askQueue.shift();
+  const ov=document.getElementById('askOverlay');
+  document.getElementById('askIcon').textContent  = cfg.icon||'❓';
+  document.getElementById('askTitle').textContent = cfg.title||'Question';
+  document.getElementById('askSub').textContent   = cfg.sub||'';
+  const body=document.getElementById('askBody');
+
+  function finish(val){
+    ov.classList.remove('show');
+    setTimeout(()=>{ body.innerHTML=''; _askNext(); },350);
+    resolve(val);
+  }
+
+  if(cfg.type==='choice'){
+    body.innerHTML=`<div class="ask-choices">${
+      (cfg.options||[]).map((o,i)=>`<button class="ask-choice" onclick="this.closest('.ask-choices').querySelectorAll('.ask-choice').forEach(b=>b.classList.remove('selected'));this.classList.add('selected');setTimeout(()=>{document.dispatchEvent(new CustomEvent('__ask__',{detail:'${i}'}))},180)">${esc(o)}</button>`
+    ).join('')
+    }</div>${cfg.cancelable?`<button class="ask-cancel" onclick="document.dispatchEvent(new CustomEvent('__ask__',{detail:'__cancel__'}))">Cancel</button>`:''}`;
+    const h=e=>{ document.removeEventListener('__ask__',h); if(e.detail==='__cancel__') finish(null); else finish(cfg.options[Number(e.detail)]); };
+    document.addEventListener('__ask__',h);
+  } else if(cfg.type==='yesno'){
+    body.innerHTML=`<div class="ask-yesno">
+      <button class="ask-yes" onclick="document.dispatchEvent(new CustomEvent('__ask__',{detail:'yes'}))">✓ Yes</button>
+      <button class="ask-no" onclick="document.dispatchEvent(new CustomEvent('__ask__',{detail:'no'}))">✕ No</button>
+    </div>${cfg.cancelable?`<button class="ask-cancel" onclick="document.dispatchEvent(new CustomEvent('__ask__',{detail:'cancel'}))">Cancel</button>`:''}`;
+    const h=e=>{ document.removeEventListener('__ask__',h); finish(e.detail==='yes'); };
+    document.addEventListener('__ask__',h);
+  } else if(cfg.type==='text'){
+    body.innerHTML=`<input id="askTxt" class="ask-input" placeholder="${cfg.placeholder||'Type here…'}" autofocus>
+      <button class="ask-submit" onclick="_askSubmitText()">Continue →</button>
+      ${cfg.cancelable?`<button class="ask-cancel" onclick="document.dispatchEvent(new CustomEvent('__ask__',{detail:'__cancel__'}))">Cancel</button>`:''}`;
+    window._askSubmitText=()=>{
+      const val=document.getElementById('askTxt')?.value?.trim()||'';
+      if(!val){ document.getElementById('askTxt').style.borderColor='var(--error)'; return; }
+      document.dispatchEvent(new CustomEvent('__ask__',{detail:val}));
+    };
+    document.getElementById('askTxt')?.addEventListener('keydown',e=>{ if(e.key==='Enter') window._askSubmitText(); });
+    const h=e=>{ document.removeEventListener('__ask__',h); finish(e.detail==='__cancel__'?null:e.detail); };
+    document.addEventListener('__ask__',h);
+  } else if(cfg.type==='multi'){
+    body.innerHTML=`<div class="ask-choices">${
+      (cfg.options||[]).map((o,i)=>`<button class="ask-choice" data-i="${i}" onclick="this.classList.toggle('selected')">${esc(o)}</button>`
+    ).join('')
+    }</div>
+    <button class="ask-submit" onclick="_askSubmitMulti()">Confirm selection →</button>
+    ${cfg.cancelable?`<button class="ask-cancel" onclick="document.dispatchEvent(new CustomEvent('__ask__',{detail:'__cancel__'}))">Cancel</button>`:''}`;
+    window._askSubmitMulti=()=>{
+      const sel=[...document.querySelectorAll('.ask-choice.selected')].map(b=>cfg.options[Number(b.dataset.i)]);
+      document.dispatchEvent(new CustomEvent('__ask__',{detail:sel.join('||')}));
+    };
+    const h=e=>{ document.removeEventListener('__ask__',h); finish(e.detail==='__cancel__'?null:e.detail.split('||').filter(Boolean)); };
+    document.addEventListener('__ask__',h);
+  }
+
+  ov.classList.add('show');
+  setTimeout(()=>{ const inp=body.querySelector('input'); if(inp) inp.focus(); },350);
+}
+
+// Close on backdrop click
+document.getElementById('askOverlay')?.addEventListener('click',e=>{
+  if(e.target===e.currentTarget && _askQueue.length===0 && _askActive){
+    document.dispatchEvent(new CustomEvent('__ask__',{detail:'__cancel__'}));
+  }
+});
+
+
+/* ══════════════════════════════════════════════════════════════════
+   NETWORK TOPOLOGY MAPPER — Force-directed canvas graph
+   Real-time visualization of nmap/scan discovered hosts + ports
+   ══════════════════════════════════════════════════════════════════ */
+let _topo = { target:'', graph:null, animFrame:null, nodes:[], edges:[], selected:null,
+              dragging:null, offsetX:0, offsetY:0, scale:1, panX:0, panY:0, lastMouse:{x:0,y:0} };
+
+async function loadTopology(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  let graphs=[]; let existingTarget='';
+  try { const r=await(await fetch('/api/topology')).json(); graphs=r.graphs||[]; } catch(_){}
+  if(!_topo.target && graphs.length) _topo.target=graphs[0].target;
+
+  wrap.innerHTML=`
+  <div style="display:flex;flex-direction:column;gap:10px;height:calc(100dvh - 120px);min-height:400px">
+
+    <!-- Toolbar -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="topoTarget" placeholder="Target: ip/hostname/cidr"
+        value="${esc(_topo.target||'')}"
+        style="flex:1;min-width:180px;padding:10px 14px;border-radius:var(--r-pill);
+               border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;outline:none">
+      <button class="btn" onclick="topoIngest()" style="white-space:nowrap">⬆ Paste nmap output</button>
+      <button class="btn sec" onclick="topoLoad()" style="white-space:nowrap">↻ Refresh</button>
+      <button class="btn sec" onclick="topoClear()" style="white-space:nowrap;color:var(--error)">✕ Clear</button>
+      <button class="btn sec" onclick="topoPNG()" style="white-space:nowrap">⬇ PNG</button>
+    </div>
+
+    <!-- Stats bar -->
+    <div id="topoStats" style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted)">
+      ${graphs.length?graphs.map(g=>`<span onclick="topoSwitch('${esc(g.target)}')" style="cursor:pointer;padding:4px 10px;border-radius:var(--r-pill);border:1px solid var(--border);${_topo.target===g.target?'background:var(--accent-light);color:var(--accent)':''}">${esc(g.target)} · ${g.nodes} nodes · ${g.edges} edges</span>`).join(''):
+      '<span>No scans yet — paste nmap output to begin</span>'}
+    </div>
+
+    <!-- Canvas + detail panel -->
+    <div style="flex:1;display:flex;gap:8px;min-height:0">
+      <div style="position:relative;flex:1;min-width:0;background:#0C0C10;border-radius:var(--r-card);overflow:hidden">
+        <canvas id="topoCanvas" style="width:100%;height:100%;display:block;touch-action:none"></canvas>
+        <div id="topoEmpty" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#444;pointer-events:none">
+          <div style="font-size:48px;margin-bottom:12px">🗺️</div>
+          <div style="font-size:14px">Paste nmap output to render topology</div>
+        </div>
+        <div style="position:absolute;top:10px;left:10px;font-size:11px;color:#444;font-family:monospace" id="topoZoom">100%</div>
+        <div style="position:absolute;bottom:10px;left:10px;font-size:11px;color:#333">
+          Scroll=zoom · Drag=pan · Click node=inspect
+        </div>
+        <div style="position:absolute;top:10px;right:10px;display:flex;gap:4px">
+          <button onclick="topoZoomIn()" style="padding:5px 8px;border-radius:8px;background:#1A1A20;border:1px solid #333;color:#888;cursor:pointer;font-size:14px">+</button>
+          <button onclick="topoZoomOut()" style="padding:5px 8px;border-radius:8px;background:#1A1A20;border:1px solid #333;color:#888;cursor:pointer;font-size:14px">−</button>
+          <button onclick="topoFit()" style="padding:5px 8px;border-radius:8px;background:#1A1A20;border:1px solid #333;color:#888;cursor:pointer;font-size:11px">Fit</button>
+        </div>
+      </div>
+      <!-- Detail panel -->
+      <div id="topoDetail" class="card" style="width:220px;flex-shrink:0;font-size:12px;overflow-y:auto;display:${_topo.selected?'block':'none'}">
+        <div id="topoDetailBody">Select a node</div>
+      </div>
+    </div>
+  </div>`;
+
+  topoBindCanvas();
+  topoLoad();
+}
+
+function topoSwitch(t){ _topo.target=t; loadTopology(); }
+
+function topoZoomIn(){ _topo.scale=Math.min(4,_topo.scale*1.25); topoDraw(); document.getElementById('topoZoom').textContent=Math.round(_topo.scale*100)+'%'; }
+function topoZoomOut(){ _topo.scale=Math.max(.1,_topo.scale/1.25); topoDraw(); document.getElementById('topoZoom').textContent=Math.round(_topo.scale*100)+'%'; }
+
+function topoFit(){
+  if(!_topo.nodes.length) return;
+  const c=document.getElementById('topoCanvas');
+  const xs=_topo.nodes.map(n=>n.x), ys=_topo.nodes.map(n=>n.y);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const W=c.width/window.devicePixelRatio, H=c.height/window.devicePixelRatio;
+  const margin=60;
+  const sx=(W-margin*2)/((maxX-minX)||1), sy=(H-margin*2)/((maxY-minY)||1);
+  _topo.scale=Math.min(sx,sy,2);
+  _topo.panX=W/2-((minX+maxX)/2)*_topo.scale;
+  _topo.panY=H/2-((minY+maxY)/2)*_topo.scale;
+  topoDraw();
+}
+
+async function topoLoad(){
+  if(!_topo.target) return;
+  try {
+    const r=await(await fetch(`/api/topology/${encodeURIComponent(_topo.target)}`)).json();
+    if(r.ok){ _topo.graph=r.graph; topoApplyGraph(r.graph); }
+  } catch(_){}
+  document.getElementById('topoEmpty').style.display=_topo.nodes.length?'none':'flex';
+}
+
+async function topoClear(){
+  if(!_topo.target) return;
+  if(!await nexusAsk({icon:'⚠️',title:'Clear topology?',sub:`This removes all discovered nodes for "${_topo.target}"`,type:'yesno',cancelable:true})) return;
+  await fetch(`/api/topology/${encodeURIComponent(_topo.target)}/clear`,{method:'POST'});
+  _topo.nodes=[]; _topo.edges=[]; topoDraw(); toast('Topology cleared');
+  document.getElementById('topoEmpty').style.display='flex';
+}
+
+async function topoIngest(){
+  const target=(document.getElementById('topoTarget')||{}).value?.trim()||await nexusAsk({icon:'🎯',title:'Enter target',type:'text',placeholder:'192.168.1.0/24',cancelable:true});
+  if(!target) return;
+  _topo.target=target;
+  const raw=await nexusAsk({icon:'📋',title:'Paste nmap output',sub:'Copy the full nmap -sV output and paste it here',type:'text',placeholder:'Starting Nmap...',cancelable:true});
+  if(!raw) return;
+  try {
+    const r=await(await fetch('/api/topology/ingest',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({target,tool:'nmap',output:raw})})).json();
+    if(r.ok){ _topo.graph=r.graph; topoApplyGraph(r.graph); toast(`+${r.graph.stats.hosts} hosts, +${r.graph.stats.ports} ports`); loadTopology(); }
+    else toast('Parse error: '+(r.error||'failed'));
+  } catch(e){ toast('Error: '+e.message); }
+}
+
+function topoApplyGraph(graph){
+  if(!graph) return;
+  const existing={}; _topo.nodes.forEach(n=>existing[n.id]=n);
+  // Merge new nodes (preserve physics positions)
+  _topo.nodes=graph.nodes.map(gn=>{
+    const ex=existing[gn.id];
+    return ex?{...ex,...gn}:{...gn,x:Math.random()*400+100,y:Math.random()*300+100,vx:0,vy:0};
+  });
+  _topo.edges=graph.edges;
+  if(!_topo.animFrame) topoPhysicsLoop();
+}
+
+const NODE_COLOR={host:'#4B9EFF',port:'#22C55E',service:'#F59E0B'};
+const NODE_R={host:18,port:11,service:14};
+
+function topoBindCanvas(){
+  const c=document.getElementById('topoCanvas'); if(!c) return;
+  const dpr=window.devicePixelRatio||1;
+  function resize(){ const r=c.parentElement.getBoundingClientRect(); c.width=r.width*dpr; c.height=r.height*dpr; topoDraw(); }
+  new ResizeObserver(resize).observe(c.parentElement); resize();
+  // Mouse/touch pan + zoom
+  let isPanning=false; let lastPan={x:0,y:0};
+  c.addEventListener('wheel',e=>{ e.preventDefault();
+    const s=e.deltaY<0?1.1:0.9;
+    _topo.scale=Math.max(0.1,Math.min(4,_topo.scale*s));
+    document.getElementById('topoZoom').textContent=Math.round(_topo.scale*100)+'%';
+    topoDraw(); },{passive:false});
+  c.addEventListener('mousedown',e=>{
+    const pos=canvasPos(c,e);
+    const hit=nodeAt(pos.x,pos.y);
+    if(hit){ _topo.dragging=hit; _topo.offsetX=hit.x-pos.x; _topo.offsetY=hit.y-pos.y; hit.pinned=true; }
+    else { isPanning=true; lastPan={x:e.clientX,y:e.clientY}; }
+  });
+  c.addEventListener('mousemove',e=>{
+    if(_topo.dragging){ const pos=canvasPos(c,e); _topo.dragging.x=pos.x+_topo.offsetX; _topo.dragging.y=pos.y+_topo.offsetY; topoDraw(); }
+    else if(isPanning){ _topo.panX+=e.clientX-lastPan.x; _topo.panY+=e.clientY-lastPan.y; lastPan={x:e.clientX,y:e.clientY}; topoDraw(); }
+  });
+  c.addEventListener('mouseup',e=>{
+    if(_topo.dragging){ const pos=canvasPos(c,e); const d=Math.hypot(pos.x+_topo.offsetX-_topo.dragging.x, pos.y+_topo.offsetY-_topo.dragging.y); if(d<5) topoSelect(_topo.dragging); _topo.dragging=null; }
+    isPanning=false;
+  });
+  // Touch
+  let lpt=null;
+  c.addEventListener('touchstart',e=>{ e.preventDefault(); lpt=e.touches[0]; const pos=canvasPos(c,e.touches[0]); const hit=nodeAt(pos.x,pos.y); if(hit){ _topo.dragging=hit; _topo.offsetX=hit.x-pos.x; _topo.offsetY=hit.y-pos.y; hit.pinned=true; } else isPanning=true; },{passive:false});
+  c.addEventListener('touchmove',e=>{ e.preventDefault(); const t=e.touches[0]; if(_topo.dragging){ const pos=canvasPos(c,t); _topo.dragging.x=pos.x+_topo.offsetX; _topo.dragging.y=pos.y+_topo.offsetY; topoDraw(); } else if(isPanning&&lpt){ _topo.panX+=t.clientX-lpt.clientX; _topo.panY+=t.clientY-lpt.clientY; lpt=t; topoDraw(); } },{passive:false});
+  c.addEventListener('touchend',e=>{ e.preventDefault(); if(_topo.dragging) topoSelect(_topo.dragging); _topo.dragging=null; isPanning=false; lpt=null; },{passive:false});
+}
+
+function canvasPos(c,ev){
+  const r=c.getBoundingClientRect();
+  return { x:(ev.clientX-r.left-_topo.panX)/_topo.scale, y:(ev.clientY-r.top-_topo.panY)/_topo.scale };
+}
+function nodeAt(x,y){ return _topo.nodes.find(n=>Math.hypot(n.x-x,n.y-y)<(NODE_R[n.type]||12)+4)||null; }
+
+function topoSelect(node){
+  _topo.selected=node;
+  const d=document.getElementById('topoDetail'); if(!d) return;
+  d.style.display='block';
+  const body=document.getElementById('topoDetailBody');
+  const col=NODE_COLOR[node.type]||'#888';
+  body.innerHTML=`
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px;color:${col}">${esc(node.label)}</div>
+    <div style="margin-bottom:4px"><span style="color:var(--muted)">Type:</span> ${node.type}</div>
+    ${node.ip?`<div style="margin-bottom:4px"><span style="color:var(--muted)">IP:</span> <code>${esc(node.ip)}</code></div>`:''}
+    ${node.port?`<div style="margin-bottom:4px"><span style="color:var(--muted)">Port:</span> ${node.port}/${node.proto||'tcp'}</div>`:''}
+    ${node.service?`<div style="margin-bottom:4px"><span style="color:var(--muted)">Service:</span> ${esc(node.service)}</div>`:''}
+    ${node.version?`<div style="margin-bottom:4px"><span style="color:var(--muted)">Version:</span> ${esc(node.version)}</div>`:''}
+    ${node.state?`<div style="margin-bottom:4px"><span style="color:var(--muted)">State:</span> <span style="color:var(--success)">${esc(node.state)}</span></div>`:''}
+    ${node.discovered_by?`<div style="margin-bottom:4px"><span style="color:var(--muted)">Discovered by:</span> ${esc(node.discovered_by)}</div>`:''}
+    <div style="margin-top:12px">
+      <div style="color:var(--muted);margin-bottom:4px">Connected to:</div>
+      ${_topo.edges.filter(e=>e.src===node.id||e.dst===node.id).map(e=>{
+        const other=_topo.nodes.find(n=>n.id===(e.src===node.id?e.dst:e.src));
+        return other?`<div onclick="topoSelect(_topo.nodes.find(n=>n.id==='${esc(other.id)}'))" style="cursor:pointer;padding:4px 6px;border-radius:6px;margin:2px 0;background:var(--bg2)">${esc(other.label)}</div>`:'';
+      }).join('')}
+    </div>
+    <button class="btn sec" style="width:100%;margin-top:12px;font-size:12px" onclick="_topo.selected=null;document.getElementById('topoDetail').style.display='none'">Close</button>`;
+  topoDraw();
+}
+
+function topoPhysicsLoop(){
+  if(!document.getElementById('topoCanvas')){ _topo.animFrame=null; return; }
+  const nodes=_topo.nodes, edges=_topo.edges;
+  const k=80, gravity=0.02, damping=0.85;
+  for(let i=0;i<nodes.length;i++){
+    const a=nodes[i]; if(!a.vx) a.vx=0; if(!a.vy) a.vy=0;
+    // Gravity toward center
+    a.vx += -gravity*a.x; a.vy += -gravity*a.y;
+    // Repulsion
+    for(let j=i+1;j<nodes.length;j++){
+      const b=nodes[j]; if(!b.vx) b.vx=0; if(!b.vy) b.vy=0;
+      const dx=b.x-a.x, dy=b.y-a.y;
+      const d=Math.max(Math.hypot(dx,dy),1);
+      const f=k*k/(d*d)*Math.min(d/10,1);
+      a.vx-=dx/d*f; a.vy-=dy/d*f;
+      b.vx+=dx/d*f; b.vy+=dy/d*f;
+    }
+    // Attraction for edges
+    for(const e of edges){
+      const src=nodes.find(n=>n.id===e.src), dst=nodes.find(n=>n.id===e.dst);
+      if(!src||!dst) continue;
+      const dx=dst.x-src.x, dy=dst.y-src.y;
+      const d=Math.max(Math.hypot(dx,dy),1);
+      const targetDist=e.type==='has_port'?60:90;
+      const f=(d-targetDist)*0.03;
+      src.vx+=dx/d*f; src.vy+=dy/d*f;
+      dst.vx-=dx/d*f; dst.vy-=dy/d*f;
+    }
+  }
+  // Integrate
+  for(const n of nodes){
+    if(n.pinned&&n===_topo.dragging) continue;
+    n.vx*=damping; n.vy*=damping;
+    n.x+=n.vx; n.y+=n.vy;
+  }
+  topoDraw();
+  _topo.animFrame=requestAnimationFrame(topoPhysicsLoop);
+}
+
+function topoDraw(){
+  const c=document.getElementById('topoCanvas'); if(!c) return;
+  const ctx=c.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  ctx.clearRect(0,0,c.width,c.height);
+  ctx.save();
+  ctx.scale(dpr,dpr);
+  ctx.translate(_topo.panX,_topo.panY);
+  ctx.scale(_topo.scale,_topo.scale);
+
+  // Edges
+  for(const e of _topo.edges){
+    const src=_topo.nodes.find(n=>n.id===e.src);
+    const dst=_topo.nodes.find(n=>n.id===e.dst);
+    if(!src||!dst) continue;
+    ctx.beginPath(); ctx.moveTo(src.x,src.y); ctx.lineTo(dst.x,dst.y);
+    ctx.strokeStyle=e.type==='has_port'?'rgba(75,158,255,.4)':'rgba(245,158,11,.3)';
+    ctx.lineWidth=e.type==='has_port'?1.5:1;
+    ctx.setLineDash(e.type==='runs'?[4,4]:[]); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // Nodes
+  for(const n of _topo.nodes){
+    const r=NODE_R[n.type]||12;
+    const col=NODE_COLOR[n.type]||'#888';
+    const isSelected=_topo.selected===n;
+    // Glow for selected
+    if(isSelected){ ctx.beginPath(); ctx.arc(n.x,n.y,r+8,0,Math.PI*2); ctx.fillStyle=col+'40'; ctx.fill(); }
+    // Node circle
+    ctx.beginPath(); ctx.arc(n.x,n.y,r,0,Math.PI*2);
+    ctx.fillStyle=isSelected?col:col+'CC'; ctx.fill();
+    ctx.strokeStyle=isSelected?'#fff':col+'88'; ctx.lineWidth=isSelected?2:1;
+    ctx.stroke();
+    // Label
+    ctx.fillStyle=isSelected?'#fff':'#aaa';
+    ctx.font=`${isSelected?'700':'500'} ${n.type==='host'?12:10}px ui-monospace,monospace`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(n.label.length>14?n.label.slice(0,13)+'…':n.label, n.x, n.y+r+10);
+    // Icon for hosts
+    if(n.type==='host'){ ctx.fillStyle='#fff'; ctx.font='bold 11px monospace'; ctx.fillText('H',n.x,n.y); }
+    else if(n.type==='port'){ ctx.fillStyle='#fff'; ctx.font='bold 8px monospace'; ctx.fillText(':'+n.port,n.x,n.y); }
+    else if(n.type==='service'){ ctx.fillStyle='#fff'; ctx.font='bold 7px monospace'; ctx.fillText('SVC',n.x,n.y); }
+  }
+  ctx.restore();
+}
+
+function topoPNG(){
+  const c=document.getElementById('topoCanvas'); if(!c) return;
+  const a=document.createElement('a'); a.href=c.toDataURL('image/png');
+  a.download='nexus-topology-'+Date.now()+'.png'; a.click(); toast('Saved topology PNG');
+}
+
+// Auto-update topology from workflow events
+function topoIngestEvent(event){
+  if(!event||!event.output) return;
+  const target=_topo.target||event.target||'scan';
+  fetch('/api/topology/ingest',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({target,tool:event.tool||event.cmd||'scan',output:event.output})
+  }).then(r=>r.json()).then(r=>{
+    if(r.ok&&r.graph){
+      _topo.graph=r.graph;
+      topoApplyGraph(r.graph);
+      if(document.getElementById('topoCanvas')) document.getElementById('topoEmpty').style.display='none';
+    }
+  }).catch(_=>{});
+}
+
 
 /* ══════════════════════════════════════════════════════════════════
    CRYPTO WALLET
