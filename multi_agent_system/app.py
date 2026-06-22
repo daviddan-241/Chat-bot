@@ -1887,6 +1887,243 @@ def session_join(session_id):
     return redirect(f'/nexus?session={session_id}')
 
 
+# ── EDR VALIDATOR ─────────────────────────────────────────────────────────────
+@app.route('/api/edr/run', methods=['POST'])
+def api_edr_run():
+    body = request.get_json(force=True) or {}
+    test = body.get('test', '').strip()
+    try:
+        from modules.edr_validator import (
+            test_process_telemetry, test_network_telemetry,
+            test_file_telemetry, test_command_obfuscation,
+            test_memory_telemetry, test_jitter_simulation,
+        )
+        fn_map = {
+            'process':     test_process_telemetry,
+            'network':     test_network_telemetry,
+            'file':        test_file_telemetry,
+            'obfuscation': test_command_obfuscation,
+            'memory':      test_memory_telemetry,
+            'jitter':      test_jitter_simulation,
+        }
+        fn = fn_map.get(test)
+        if not fn:
+            return jsonify({'ok': False, 'error': f'Unknown test: {test}'}), 400
+        result = fn()
+        return jsonify({'ok': True, **result})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/edr/run-all', methods=['POST'])
+def api_edr_run_all():
+    def _gen():
+        try:
+            from modules.edr_validator import run_all_tests
+            for event in run_all_tests():
+                yield json.dumps(event) + '\n'
+        except Exception as e:
+            yield json.dumps({'type': 'error', 'message': str(e)}) + '\n'
+    return Response(stream_with_context(_gen()), content_type='application/x-ndjson')
+
+
+# ── TOR MANAGER ───────────────────────────────────────────────────────────────
+@app.route('/api/tor/status')
+def api_tor_status():
+    try:
+        from modules.tor_manager import tor_status
+        return jsonify(tor_status())
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
+@app.route('/api/tor/new-circuit', methods=['POST'])
+def api_tor_new_circuit():
+    try:
+        from modules.tor_manager import new_circuit
+        return jsonify(new_circuit())
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/tor/exit-ip')
+def api_tor_exit_ip():
+    try:
+        from modules.tor_manager import get_exit_ip
+        return jsonify(get_exit_ip())
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/tor/start-rotate', methods=['POST'])
+def api_tor_start_rotate():
+    try:
+        from modules.tor_manager import start_auto_rotate
+        return jsonify(start_auto_rotate())
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/tor/stop-rotate', methods=['POST'])
+def api_tor_stop_rotate():
+    try:
+        from modules.tor_manager import stop_auto_rotate
+        return jsonify(stop_auto_rotate())
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/tor/doh', methods=['POST'])
+def api_tor_doh():
+    body     = request.get_json(force=True) or {}
+    domain   = body.get('domain', '').strip()
+    qtype    = body.get('type', 'A').strip()
+    resolver = body.get('resolver', 'cloudflare')
+    if not domain:
+        return jsonify({'ok': False, 'error': 'domain required'}), 400
+    try:
+        from modules.tor_manager import doh_lookup
+        return jsonify(doh_lookup(domain, qtype, resolver))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# ── JOB QUEUE ─────────────────────────────────────────────────────────────────
+@app.route('/api/jobs', methods=['GET', 'POST'])
+def api_jobs():
+    if request.method == 'GET':
+        from modules.job_queue import list_jobs
+        return jsonify({'ok': True, 'jobs': list_jobs()})
+    body = request.get_json(force=True) or {}
+    name = body.get('name', 'Job')
+    cmd  = body.get('cmd', '').strip()
+    if not cmd:
+        return jsonify({'ok': False, 'error': 'cmd required'}), 400
+    import subprocess
+    from modules.job_queue import submit
+    result = submit(name, subprocess.run, (cmd,),
+                    {'shell': True, 'capture_output': True, 'text': True, 'timeout': 300})
+    return jsonify(result)
+
+@app.route('/api/jobs/offline', methods=['GET'])
+def api_jobs_offline():
+    from modules.job_queue import get_offline_queue
+    return jsonify({'ok': True, 'queue': get_offline_queue()})
+
+@app.route('/api/jobs/offline/flush', methods=['POST'])
+def api_jobs_offline_flush():
+    from modules.job_queue import flush_offline_queue
+    return jsonify({'ok': True, 'results': flush_offline_queue()})
+
+@app.route('/api/jobs/<job_id>', methods=['GET', 'DELETE'])
+def api_job(job_id):
+    if request.method == 'GET':
+        from modules.job_queue import get_status
+        return jsonify(get_status(job_id))
+    from modules.job_queue import cancel_job
+    return jsonify(cancel_job(job_id))
+
+@app.route('/api/jobs/<job_id>/stream')
+def api_job_stream(job_id):
+    def _gen():
+        from modules.job_queue import stream_output
+        for line in stream_output(job_id, timeout=3600):
+            yield f"data: {json.dumps({'line': line})}\n\n"
+        yield "data: {\"done\": true}\n\n"
+    return Response(stream_with_context(_gen()), content_type='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+# ── SECURE DELETE ─────────────────────────────────────────────────────────────
+@app.route('/api/secure-delete', methods=['POST'])
+def api_secure_delete():
+    body      = request.get_json(force=True) or {}
+    paths     = body.get('paths', [])
+    passes    = min(int(body.get('passes', 3)), 7)
+    gen_report= body.get('report', True)
+    wipe_tmp  = body.get('wipe_temp', False)
+    try:
+        from modules.secure_delete import secure_delete, secure_delete_dir, wipe_temp_dir
+        results = []
+        total   = 0
+        for p in paths:
+            p = p.strip()
+            if not p:
+                continue
+            if os.path.isfile(p):
+                r = secure_delete(p, passes=passes)
+            elif os.path.isdir(p):
+                r = secure_delete_dir(p, passes=passes)
+            else:
+                r = {'ok': False, 'path': p, 'error': 'not found', 'size': 0}
+            results.append(r)
+            total += r.get('size', 0)
+        if wipe_tmp:
+            r = wipe_temp_dir("nexus_")
+            results.extend(r.get('results', []))
+        # Human-readable total
+        def _hr(n):
+            for u in ("B", "KB", "MB", "GB"):
+                if n < 1024: return f"{n:.1f} {u}"
+                n //= 1024
+            return f"{n} GB"
+        resp = {'ok': True, 'results': results, 'total_bytes': total, 'total_hr': _hr(total)}
+        if gen_report:
+            from modules.secure_delete import gdpr_wipe_report
+            resp['report'] = gdpr_wipe_report(paths)
+        return jsonify(resp)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# ── REAL-TIME SESSION EVENTS (SSE) ────────────────────────────────────────────
+_session_queues: dict = {}   # session_id → list[queue.Queue]
+
+def _session_broadcast(session_id: str, event: dict):
+    """Push an event to all SSE subscribers of a session."""
+    queues = _session_queues.get(session_id, [])
+    dead   = []
+    for q in queues:
+        try:
+            q.put_nowait(event)
+        except Exception:
+            dead.append(q)
+    for q in dead:
+        try: queues.remove(q)
+        except Exception: pass
+
+@app.route('/api/sessions/<session_id>/events')
+def api_session_events(session_id):
+    """SSE stream — real-time collaboration events for a shared session."""
+    s = _SESSIONS.get(session_id)
+    if not s or s.get('expires_at', 0) < time.time():
+        return jsonify({'ok': False, 'error': 'Session not found or expired'}), 404
+    import queue as _q
+    q = _q.Queue(maxsize=1000)
+    _session_queues.setdefault(session_id, []).append(q)
+    def _gen():
+        yield f"data: {json.dumps({'type': 'connected', 'session': session_id})}\n\n"
+        try:
+            while True:
+                try:
+                    event = q.get(timeout=30)
+                    if event is None:
+                        break
+                    yield f"data: {json.dumps(event)}\n\n"
+                except Exception:
+                    yield ": heartbeat\n\n"
+        finally:
+            try: _session_queues.get(session_id, []).remove(q)
+            except Exception: pass
+    return Response(stream_with_context(_gen()), content_type='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+@app.route('/api/sessions/<session_id>/publish', methods=['POST'])
+def api_session_publish(session_id):
+    """Broadcast an event to all session subscribers."""
+    s = _SESSIONS.get(session_id)
+    if not s:
+        return jsonify({'ok': False, 'error': 'Session not found'}), 404
+    body  = request.get_json(force=True) or {}
+    event = {'session': session_id, 'ts': time.time(), **body}
+    _session_broadcast(session_id, event)
+    return jsonify({'ok': True, 'subscribers': len(_session_queues.get(session_id, []))})
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
