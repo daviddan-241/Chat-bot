@@ -6,19 +6,27 @@ let busy = false;
 /* ── Sidebar nav model ── */
 const NAV = [
   {sec:'Home'},
-  {id:'chat', ico:'💬', label:'New Chat', badge:''},
-  {id:'history', ico:'🕘', label:'Chat History'},
-  {id:'projects', ico:'📁', label:'Projects'},
-  {id:'agents', ico:'🧠', label:'Agents', badge:'470'},
+  {id:'chat',      ico:'💬', label:'New Chat',       badge:''},
+  {id:'history',   ico:'🕘', label:'Chat History'},
+  {id:'projects',  ico:'📁', label:'Projects'},
+  {id:'agents',    ico:'🧠', label:'Agents',          badge:'470'},
   {id:'artifacts', ico:'✨', label:'Artifacts'},
-  {id:'skills', ico:'📚', label:'Skills Library'},
+  {id:'skills',    ico:'📚', label:'Skills Library'},
+  {sec:'Local AI'},
+  {id:'models',    ico:'🤖', label:'AI Models'},
+  {sec:'Security'},
+  {id:'workflow',  ico:'⚡', label:'Auto Workflow'},
+  {id:'testplans', ico:'🗂️', label:'Test Plans'},
+  {id:'analysis',  ico:'🔬', label:'File Analysis'},
   {sec:'Platform'},
-  {id:'wallet', ico:'💰', label:'Crypto Wallet'},
-  {id:'testplans', ico:'🗂️', label:'Test Plan Executor'},
-  {id:'connectors', ico:'🔌', label:'Connectors'},
-  {id:'deployments', ico:'🚀', label:'Deployments'},
+  {id:'wallet',    ico:'💰', label:'Crypto Wallet'},
+  {id:'connectors',ico:'🔌', label:'Connectors'},
+  {id:'deployments',ico:'🚀',label:'Deployments'},
   {id:'knowledge', ico:'🗄️', label:'Knowledge Base'},
-  {id:'settings', ico:'⚙️', label:'Settings'},
+  {sec:'System'},
+  {id:'rules',     ico:'📋', label:'Rules Editor'},
+  {id:'sessions',  ico:'🔗', label:'Live Sessions'},
+  {id:'settings',  ico:'⚙️', label:'Settings'},
 ];
 
 function buildNav(){
@@ -30,9 +38,13 @@ function buildNav(){
   }).join('');
 }
 
-const TITLES={chat:'New Chat',agents:'Agent Dashboard',connectors:'Connectors',settings:'Settings',
-  artifacts:'Artifacts',projects:'Projects',skills:'Skills Library',deployments:'Deployments',
-  knowledge:'Knowledge Base',history:'Chat History',wallet:'Crypto Wallet',testplans:'Test Plan Executor'};
+const TITLES={
+  chat:'New Chat', agents:'Agent Dashboard', connectors:'Connectors', settings:'Settings',
+  artifacts:'Artifacts', projects:'Projects', skills:'Skills Library', deployments:'Deployments',
+  knowledge:'Knowledge Base', history:'Chat History', wallet:'Crypto Wallet',
+  testplans:'Test Plan Executor', models:'AI Models (Ollama)', workflow:'Automated Security Workflow',
+  analysis:'File Analysis', rules:'Rules & Behavior Editor', sessions:'Live Sessions',
+};
 
 /* ── TOAST ── */
 function toast(msg){
@@ -53,12 +65,19 @@ function go(id){
   document.getElementById('inputbar').style.display = (id==='chat')?'block':'none';
 
   document.getElementById('fab').style.display = (id==='chat')?'grid':'none';
-  if(['chat','agents','connectors','settings','artifacts','skills','deployments','projects','history','wallet','testplans'].includes(id)){
-    if(id==='skills'){ document.getElementById('view-generic').classList.add('active'); loadSkills(); }
+  const GENERIC_VIEWS = ['chat','agents','connectors','settings','artifacts','skills','deployments',
+    'projects','history','wallet','testplans','models','workflow','analysis','rules','sessions'];
+  if(GENERIC_VIEWS.includes(id)){
+    if(id==='skills')      { document.getElementById('view-generic').classList.add('active'); loadSkills(); }
     else if(id==='deployments'){ document.getElementById('view-generic').classList.add('active'); loadDeployments(); }
-    else if(id==='projects'){ document.getElementById('view-generic').classList.add('active'); loadProjects(); }
-    else if(id==='history'){ document.getElementById('view-generic').classList.add('active'); loadHistory(); }
-    else if(id==='testplans'){ document.getElementById('view-generic').classList.add('active'); loadTestPlans(); }
+    else if(id==='projects')   { document.getElementById('view-generic').classList.add('active'); loadProjects(); }
+    else if(id==='history')    { document.getElementById('view-generic').classList.add('active'); loadHistory(); }
+    else if(id==='testplans')  { document.getElementById('view-generic').classList.add('active'); loadTestPlans(); }
+    else if(id==='models')     { document.getElementById('view-generic').classList.add('active'); loadModels(); }
+    else if(id==='workflow')   { document.getElementById('view-generic').classList.add('active'); loadWorkflow(); }
+    else if(id==='analysis')   { document.getElementById('view-generic').classList.add('active'); loadAnalysis(); }
+    else if(id==='rules')      { document.getElementById('view-generic').classList.add('active'); loadRules(); }
+    else if(id==='sessions')   { document.getElementById('view-generic').classList.add('active'); loadSessions(); }
     else { document.getElementById('view-'+id).classList.add('active');
       if(id==='agents'){ loadAgents(); AUTO_REFRESH=setInterval(()=>{ if(document.getElementById('view-agents').classList.contains('active')) loadAgents(); }, 4000); }
       if(id==='connectors') loadConnectors();
@@ -1387,6 +1406,539 @@ function bpRunPlan(){
   ].join('\n');
   parsePlanYaml(yaml, name);
   tpTab('run');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AI MODELS — Ollama local model management
+   Supports: Qwen, DeepSeek, Llama, Mistral, Phi-3, CodeLlama
+   ══════════════════════════════════════════════════════════════════ */
+const RECOMMENDED_MODELS=[
+  {id:'qwen2.5:7b',    name:'Qwen 2.5 7B',      size:'~4.7 GB', tag:'Best overall'},
+  {id:'qwen2.5:1.5b',  name:'Qwen 2.5 1.5B',    size:'~1 GB',   tag:'Ultra-fast'},
+  {id:'deepseek-r1:7b',name:'DeepSeek R1 7B',   size:'~4.7 GB', tag:'Reasoning'},
+  {id:'deepseek-r1:1.5b',name:'DeepSeek R1 1.5B',size:'~1 GB',  tag:'Fast reasoning'},
+  {id:'llama3.2:3b',   name:'Llama 3.2 3B',     size:'~2 GB',   tag:'Balanced'},
+  {id:'llama3.2:1b',   name:'Llama 3.2 1B',     size:'~0.8 GB', tag:'Minimal'},
+  {id:'mistral:7b',    name:'Mistral 7B',        size:'~4.1 GB', tag:'EU open model'},
+  {id:'phi3:mini',     name:'Phi-3 Mini',        size:'~2.2 GB', tag:'Microsoft'},
+  {id:'codellama:7b',  name:'Code Llama 7B',     size:'~3.8 GB', tag:'Code specialist'},
+  {id:'gemma2:2b',     name:'Gemma 2 2B',        size:'~1.6 GB', tag:'Google'},
+];
+
+async function loadModels(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  wrap.innerHTML=`<div class="card"><div class="spinner"></div> Checking Ollama…</div>`;
+  let status={available:false}, installed=[];
+  try {
+    const r=await (await fetch('/api/ollama/status')).json();
+    status=r;
+    if(r.available) installed=r.models||[];
+  } catch(e){}
+  const installedIds=new Set(installed.map(m=>m.name||m.model||m));
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1">
+        <h3 style="margin:0 0 4px">🤖 AI Models — Ollama</h3>
+        <p style="color:var(--text2);font-size:13px;margin:0">Run Qwen, DeepSeek, Llama locally — free, offline, private.</p>
+      </div>
+      <span class="tag ${status.available?'on':'off'}" style="font-size:13px;padding:6px 14px">
+        ${status.available?'✅ Ollama running':'❌ Ollama offline'}
+      </span>
+    </div>
+    ${!status.available?`<div style="margin-top:12px;background:var(--bg2);border-radius:12px;padding:14px;font-size:13px;color:var(--text2)">
+      <b>To enable local AI:</b><br>
+      1. <a href="https://ollama.ai" target="_blank" style="color:var(--accent)">Download Ollama</a> and run it<br>
+      2. Set <code>OLLAMA_HOST=http://localhost:11434</code> env var<br>
+      3. Or use Docker Compose — Ollama starts automatically<br>
+      <div style="margin-top:8px">Current host: <code>${status.host||'http://localhost:11434'}</code></div>
+    </div>`:''}
+  </div>
+
+  ${status.available&&installed.length?`
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 10px">📦 Installed Models (${installed.length})</h3>
+    <div id="installedList">
+    ${installed.map(m=>{
+      const name=m.name||m.model||m;
+      const size=m.size?Math.round(m.size/1e9*10)/10+'GB':'?';
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:10px;margin-bottom:6px">
+        <span style="font-size:20px">🟢</span>
+        <div style="flex:1"><div style="font-weight:600">${esc(name)}</div>
+          <div style="font-size:12px;color:var(--muted)">${size}</div></div>
+        <button class="btn sec" style="padding:6px 12px;font-size:12px"
+          onclick="chatWithModel('${esc(name)}')">💬 Chat</button>
+        <button class="btn sec" style="padding:6px 12px;font-size:12px;color:var(--error)"
+          onclick="deleteModel('${esc(name)}')">🗑</button>
+      </div>`;}).join('')}
+    </div>
+  </div>`:''}
+
+  <div class="card">
+    <h3 style="margin:0 0 10px">⬇ Pull a Model</h3>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <input id="pullModelInput" placeholder="e.g. qwen2.5:7b or deepseek-r1:1.5b"
+        style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px">
+      <button class="btn" onclick="pullModel()">Pull</button>
+    </div>
+    <div id="pullProgress" style="font-size:13px;color:var(--text2)"></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:12px">
+    ${RECOMMENDED_MODELS.map(m=>{
+      const done=installedIds.has(m.id)||[...installedIds].some(n=>n.startsWith(m.id.split(':')[0]));
+      return `<div onclick="document.getElementById('pullModelInput').value='${m.id}'"
+        style="border:1px solid var(--border);border-radius:12px;padding:12px;cursor:pointer;transition:.15s;${done?'background:var(--accent-light);border-color:var(--accent)':''}"
+        onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background='${done?'var(--accent-light)':''}' ">
+        <div style="font-weight:600;font-size:13px">${m.name} ${done?'✅':''}</div>
+        <div style="font-size:11px;color:var(--muted)">${m.size} · ${m.tag}</div>
+        <div style="font-size:11px;color:var(--accent);margin-top:4px;font-family:monospace">${m.id}</div>
+      </div>`;}).join('')}
+    </div>
+  </div>
+
+  <div class="card" id="modelChatCard" style="display:none;margin-top:10px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <h3 style="margin:0;flex:1">💬 Chat — <span id="modelChatName"></span></h3>
+      <button class="btn sec" onclick="document.getElementById('modelChatCard').style.display='none'">Close</button>
+    </div>
+    <div id="modelChatHistory" style="min-height:80px;max-height:300px;overflow-y:auto;background:var(--bg2);border-radius:12px;padding:12px;font-size:14px;margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px">
+      <textarea id="modelChatInput" rows="2" placeholder="Message…"
+        style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;resize:none"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendModelChat();}"></textarea>
+      <button class="btn" onclick="sendModelChat()">Send</button>
+    </div>
+  </div>`;
+}
+
+let _modelChatHistory=[];
+function chatWithModel(name){
+  _modelChatHistory=[];
+  document.getElementById('modelChatCard').style.display='block';
+  document.getElementById('modelChatName').textContent=name;
+  document.getElementById('modelChatHistory').innerHTML='<span style="color:var(--muted)">Start chatting…</span>';
+  document.getElementById('modelChatInput').focus();
+}
+
+async function pullModel(){
+  const model=(document.getElementById('pullModelInput')||{}).value?.trim();
+  if(!model){ toast('Enter a model name'); return; }
+  const prog=document.getElementById('pullProgress');
+  prog.innerHTML=`<span class="spinner"></span> Pulling ${esc(model)}…`;
+  try {
+    const r=await fetch('/api/ollama/pull',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model})});
+    const rd=r.body.getReader(); const dec=new TextDecoder();
+    while(true){
+      const {done,value}=await rd.read(); if(done) break;
+      const txt=dec.decode(value,{stream:true});
+      for(const line of txt.split('\n')){
+        if(!line.trim()) continue;
+        try { const obj=JSON.parse(line); prog.textContent=obj.status||obj.message||line; }
+        catch { prog.textContent=line; }
+      }
+    }
+    prog.innerHTML=`<span style="color:var(--success)">✅ ${esc(model)} pulled successfully</span>`;
+    setTimeout(loadModels, 1500);
+  } catch(e){ prog.innerHTML=`<span style="color:var(--error)">Error: ${esc(e.message)}</span>`; }
+}
+
+async function sendModelChat(){
+  const model=document.getElementById('modelChatName')?.textContent;
+  const inp=document.getElementById('modelChatInput');
+  const msg=inp?.value?.trim(); if(!msg||!model) return;
+  inp.value='';
+  _modelChatHistory.push({role:'user',content:msg});
+  const hist=document.getElementById('modelChatHistory');
+  hist.innerHTML=_modelChatHistory.map(m=>
+    `<div style="margin-bottom:8px"><b style="color:${m.role==='user'?'var(--accent)':'var(--text2)'}">${m.role==='user'?'You':'AI'}:</b> ${esc(m.content)}</div>`
+  ).join('')+'<div id="mcStream" style="color:var(--text2)"><span class="spinner"></span></div>';
+  hist.scrollTop=hist.scrollHeight;
+  try {
+    const r=await fetch('/api/ollama/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model,messages:_modelChatHistory})});
+    const rd=r.body.getReader(); const dec=new TextDecoder();
+    let reply='';
+    const streamEl=document.getElementById('mcStream');
+    while(true){
+      const {done,value}=await rd.read(); if(done) break;
+      reply+=dec.decode(value,{stream:true});
+      if(streamEl) streamEl.textContent=reply;
+      hist.scrollTop=hist.scrollHeight;
+    }
+    _modelChatHistory.push({role:'assistant',content:reply});
+    hist.innerHTML=_modelChatHistory.map(m=>
+      `<div style="margin-bottom:8px"><b style="color:${m.role==='user'?'var(--accent)':'var(--text2)'}">${m.role==='user'?'You':'AI'}:</b> <span style="white-space:pre-wrap">${esc(m.content)}</span></div>`
+    ).join('');
+    hist.scrollTop=hist.scrollHeight;
+  } catch(e){ const s=document.getElementById('mcStream'); if(s) s.innerHTML=`<span style="color:var(--error)">${esc(e.message)}</span>`; }
+}
+
+async function deleteModel(name){
+  if(!confirm(`Delete model ${name}? This removes it from Ollama.`)) return;
+  const r=await (await fetch('/api/ollama/delete',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:name})})).json();
+  if(r.ok){ toast(`${name} deleted`); loadModels(); }
+  else toast('Error: '+(r.error||'failed'));
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AUTO WORKFLOW — Phased security assessment engine
+   Target must be in scope.txt before execution.
+   ══════════════════════════════════════════════════════════════════ */
+async function loadWorkflow(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  let scope=[];
+  try { const r=await (await fetch('/api/scope')).json(); scope=r.scope||[]; } catch(e){}
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 6px">⚡ Automated Security Workflow</h3>
+    <p style="color:var(--text2);font-size:13px;margin:0 0 12px">
+      8-phase automated assessment: Discovery → Enumeration → Vulnerability ID → Validation → SSL → DNS → Headers → Report.<br>
+      <b>All targets must be listed in scope.txt.</b> Streaming output. No confirmation required between phases.
+    </p>
+    <div style="background:#FFF9F0;border:1px solid var(--warning);border-radius:10px;padding:10px;font-size:12px;color:#92601F;margin-bottom:12px">
+      ⚠️ <b>AUTHORISED TESTING ONLY.</b> Only run against systems you own or have written permission to test.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <input id="wfTarget" placeholder="Target IP or hostname (must be in scope)" value="${scope[0]||''}"
+        style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px">
+      <button class="btn" onclick="startWorkflow()">▶ Run Workflow</button>
+      <button class="btn sec" onclick="loadScopeEditor()">📋 Edit Scope</button>
+    </div>
+    ${scope.length?`<div style="font-size:12px;color:var(--muted)">Current scope: ${scope.map(s=>`<code style="background:var(--bg2);padding:2px 6px;border-radius:4px">${esc(s)}</code>`).join(' ')}</div>`
+      :'<div style="font-size:12px;color:var(--error)">⚠️ scope.txt is empty — add targets before running</div>'}
+  </div>
+  <div id="wfOutput" style="display:none" class="card">
+    <div id="wfPhaseBar" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px"></div>
+    <div id="wfStream" style="background:#10100E;color:#D4F5C4;border-radius:12px;padding:14px;font-family:ui-monospace,monospace;font-size:12px;max-height:500px;overflow-y:auto;white-space:pre-wrap"></div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn sec" onclick="downloadWfLog()">⬇ Download Report</button>
+      <button class="btn sec" style="color:var(--error)" onclick="stopWorkflow()">■ Stop</button>
+    </div>
+  </div>
+  <div id="scopeCard" style="display:none" class="card" style="margin-top:10px">
+    <h3 style="margin:0 0 8px">📋 Scope Editor — scope.txt</h3>
+    <p style="font-size:13px;color:var(--text2);margin:0 0 8px">One IP, hostname, or CIDR per line. Only listed targets can be assessed.</p>
+    <textarea id="scopeText" rows="6" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-family:ui-monospace,monospace;font-size:13px"
+      placeholder="192.168.1.1&#10;10.0.0.0/24&#10;example.internal">${scope.join('\n')}</textarea>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn" onclick="saveScope()">💾 Save Scope</button>
+      <button class="btn sec" onclick="document.getElementById('scopeCard').style.display='none'">Cancel</button>
+    </div>
+  </div>`;
+}
+
+let _wfLog='', _wfAbort=null;
+async function startWorkflow(){
+  const target=(document.getElementById('wfTarget')||{}).value?.trim();
+  if(!target){ toast('Enter a target'); return; }
+  document.getElementById('wfOutput').style.display='block';
+  const stream=document.getElementById('wfStream');
+  const phases=document.getElementById('wfPhaseBar');
+  _wfLog=''; stream.textContent='';
+  phases.innerHTML='';
+  const PHASE_NAMES=['1:Discovery','2:Enumeration','3:Vuln ID','4:Validation','5:SSL/TLS','6:DNS','7:Headers','8:Report'];
+  phases.innerHTML=PHASE_NAMES.map((n,i)=>`<span id="wfph-${i+1}" style="padding:4px 8px;border-radius:6px;background:var(--bg2);font-size:11px;border:1px solid var(--border)">${n}</span>`).join('');
+  try {
+    const r=await fetch('/api/workflow/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target})});
+    const rd=r.body.getReader(); const dec=new TextDecoder();
+    while(true){
+      const {done,value}=await rd.read(); if(done) break;
+      const txt=dec.decode(value,{stream:true});
+      for(const line of txt.split('\n')){
+        if(!line.trim()) continue;
+        try {
+          const obj=JSON.parse(line);
+          if(obj.type==='error'){ stream.textContent+='\n❌ '+obj.message; break; }
+          if(obj.type==='phase_start'){
+            const ph=document.getElementById('wfph-'+obj.phase);
+            if(ph) ph.style.background='var(--accent)'; if(ph) ph.style.color='#fff';
+            stream.textContent+=`\n${'─'.repeat(50)}\n▶ Phase ${obj.phase}: ${obj.name}\n   ${obj.desc}\n`;
+          }
+          if(obj.type==='cmd_start') stream.textContent+=`\n$ ${obj.cmd}\n`;
+          if(obj.type==='cmd_result'){ stream.textContent+=obj.output+'\n'; }
+          if(obj.type==='phase_done'){
+            const ph=document.getElementById('wfph-'+obj.phase);
+            if(ph){ ph.style.background='var(--success)'; ph.style.color='#fff'; }
+          }
+          if(obj.type==='complete'){
+            stream.textContent+=`\n${'═'.repeat(50)}\n✅ Assessment complete in ${obj.duration_s}s — ${obj.phases_done} phases\n`;
+          }
+        } catch { stream.textContent+=line+'\n'; }
+        _wfLog=stream.textContent;
+        stream.scrollTop=stream.scrollHeight;
+      }
+    }
+  } catch(e){ stream.textContent+='\n[Error: '+e.message+']'; }
+}
+
+function stopWorkflow(){ if(_wfAbort) _wfAbort(); toast('Workflow stopped'); }
+function downloadWfLog(){
+  const a=document.createElement('a');
+  a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(_wfLog);
+  a.download='nexus-assessment-'+Date.now()+'.txt'; a.click();
+}
+function loadScopeEditor(){ document.getElementById('scopeCard').style.display='block'; }
+async function saveScope(){
+  const txt=(document.getElementById('scopeText')||{}).value||'';
+  const scope=txt.split('\n').map(l=>l.trim()).filter(Boolean);
+  const r=await (await fetch('/api/scope',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope})})).json();
+  if(r.ok){ toast('Scope saved'); document.getElementById('scopeCard').style.display='none'; loadWorkflow(); }
+  else toast('Error: '+(r.error||'failed'));
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   FILE ANALYSIS — Static analysis of uploaded files
+   ══════════════════════════════════════════════════════════════════ */
+async function loadAnalysis(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  wrap.innerHTML=`
+  <div class="card">
+    <h3 style="margin:0 0 6px">🔬 File Analysis</h3>
+    <p style="color:var(--text2);font-size:13px;margin:0 0 12px">
+      Static analysis: file type detection, entropy, hashes, strings extraction, archive listing.
+      Supports ZIP, TAR, ELF, PE/EXE, APK, OLE docs, PDF, and more.
+    </p>
+    <div style="border:2px dashed var(--border);border-radius:14px;padding:30px;text-align:center;cursor:pointer;margin-bottom:12px"
+      onclick="document.getElementById('analysisFileInput').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+      ondragleave="this.style.borderColor='var(--border)'"
+      ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleAnalysisDrop(event)">
+      <div style="font-size:32px;margin-bottom:8px">📁</div>
+      <div style="font-weight:600">Drop file here or click to upload</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">Any file type · max 50 MB</div>
+    </div>
+    <input type="file" id="analysisFileInput" style="display:none" onchange="analyzeFile(this.files[0])">
+    <div id="analysisOutput"></div>
+  </div>`;
+}
+
+function handleAnalysisDrop(e){
+  const f=e.dataTransfer.files[0]; if(f) analyzeFile(f);
+}
+
+async function analyzeFile(file){
+  if(!file) return;
+  const out=document.getElementById('analysisOutput');
+  out.innerHTML='<div class="spinner"></div> Analyzing '+esc(file.name)+'…';
+  const fd=new FormData(); fd.append('file',file);
+  try {
+    const r=await (await fetch('/api/analysis',{method:'POST',body:fd})).json();
+    if(!r.ok){ out.innerHTML=`<span style="color:var(--error)">Error: ${esc(r.error||'failed')}</span>`; return; }
+    const a=r;
+    const entropyColor=a.entropy>7.5?'var(--error)':a.entropy>6?'var(--warning)':'var(--success)';
+    out.innerHTML=`
+    <div style="border:1px solid var(--border);border-radius:14px;padding:14px;margin-top:4px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div><div style="font-size:11px;color:var(--muted)">FILE NAME</div><div style="font-weight:600">${esc(file.name)}</div></div>
+        <div><div style="font-size:11px;color:var(--muted)">TYPE</div><div style="font-weight:600">${esc(a.type||'unknown')}</div></div>
+        <div><div style="font-size:11px;color:var(--muted)">SIZE</div><div>${esc(a.size_hr||'?')}</div></div>
+        <div><div style="font-size:11px;color:var(--muted)">ENTROPY</div>
+          <div style="color:${entropyColor};font-weight:600">${a.entropy} ${a.entropy>7.5?' ⚠️ High (packed/encrypted)':''}</div></div>
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">HASHES</div>
+        ${Object.entries(a.hashes||{}).map(([k,v])=>`
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:3px">
+            <span style="color:var(--muted);min-width:50px">${k.toUpperCase()}</span>
+            <code style="flex:1;overflow:hidden;text-overflow:ellipsis">${v}</code>
+            <span style="cursor:pointer" onclick="copyText('${v}')">📋</span>
+          </div>`).join('')}
+      </div>
+      ${a.warning?`<div style="background:#FFF3CD;border:1px solid var(--warning);border-radius:8px;padding:8px 10px;font-size:12px;color:#92601F;margin-bottom:10px">⚠️ ${esc(a.warning)}</div>`:''}
+      ${a.archive_contents?.length?`
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">CONTENTS (${a.archive_contents.length})</div>
+        <pre style="background:var(--bg2);border-radius:8px;padding:8px;font-size:11px;max-height:120px;overflow:auto">${esc(a.archive_contents.join('\n'))}</pre>
+      </div>`:''}
+      ${a.strings_sample?.length?`
+      <div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">STRINGS (${a.strings_sample.length} extracted)</div>
+        <pre style="background:var(--bg2);border-radius:8px;padding:8px;font-size:11px;max-height:160px;overflow:auto">${esc(a.strings_sample.join('\n'))}</pre>
+      </div>`:''}
+      ${a.preview?`
+      <div style="margin-top:8px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">PREVIEW</div>
+        <pre style="background:var(--bg2);border-radius:8px;padding:8px;font-size:11px;max-height:160px;overflow:auto">${esc(a.preview)}</pre>
+      </div>`:''}
+    </div>`;
+  } catch(e){ out.innerHTML=`<span style="color:var(--error)">Error: ${esc(e.message)}</span>`; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   RULES EDITOR — System prompt + aliases + profiles
+   ══════════════════════════════════════════════════════════════════ */
+async function loadRules(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  wrap.innerHTML=`<div class="card"><div class="spinner"></div> Loading rules…</div>`;
+  let rules={};
+  try { const r=await (await fetch('/api/rules')).json(); rules=r.rules||{}; } catch(e){}
+  const sysPrompt=rules.system_prompt||'You are NEXUS, an advanced AI operating system. Be precise, helpful, and professional.';
+  const aliases=rules.aliases||{};
+  const scope=rules.scope||[];
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 4px">📋 Rules & Behavior Editor</h3>
+    <p style="color:var(--text2);font-size:13px;margin:0 0 12px">
+      Edit system behavior, define command aliases, and manage allowed scope. Changes persist across restarts.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      <button class="btn" onclick="saveRules()">💾 Save All Rules</button>
+      <button class="btn sec" onclick="exportRules()">⬇ Export Profile</button>
+      <label style="position:relative;overflow:hidden">
+        <button class="btn sec">⬆ Import Profile</button>
+        <input type="file" accept=".json" style="position:absolute;opacity:0;width:100%;height:100%;top:0;left:0;cursor:pointer"
+          onchange="importRules(this)">
+      </label>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">System Prompt</label>
+      <textarea id="rulesSystemPrompt" rows="6"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;resize:vertical"
+        >${esc(sysPrompt)}</textarea>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Command Aliases</label>
+      <div id="aliasesList">
+        ${Object.entries(aliases).map(([k,v])=>aliasRow(k,v)).join('')}
+      </div>
+      <button class="btn sec" onclick="addAlias()" style="width:100%;margin-top:6px">＋ Add Alias</button>
+    </div>
+
+    <div>
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Default Scope (allowed targets)</label>
+      <textarea id="rulesScope" rows="4"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-family:ui-monospace,monospace;font-size:13px;resize:vertical"
+        placeholder="192.168.1.0/24&#10;lab.internal">${esc(scope.join('\n'))}</textarea>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">One IP, hostname, or CIDR per line. Used by the Auto Workflow engine.</div>
+    </div>
+  </div>`;
+}
+
+function aliasRow(k='',v=''){
+  return `<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+    <input class="aliasKey" value="${esc(k)}" placeholder="/alias" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+    <span style="color:var(--muted)">→</span>
+    <input class="aliasVal" value="${esc(v)}" placeholder="expanded command" style="flex:3;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+    <button onclick="this.closest('div').remove()" style="padding:6px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);color:var(--error);cursor:pointer">✕</button>
+  </div>`;
+}
+
+function addAlias(){
+  const el=document.getElementById('aliasesList');
+  const div=document.createElement('div');
+  div.innerHTML=aliasRow(); el.appendChild(div.firstChild);
+}
+
+async function saveRules(){
+  const sysPrompt=(document.getElementById('rulesSystemPrompt')||{}).value||'';
+  const scope=((document.getElementById('rulesScope')||{}).value||'').split('\n').map(l=>l.trim()).filter(Boolean);
+  const aliases={};
+  document.querySelectorAll('.aliasKey').forEach((k,i)=>{
+    const v=document.querySelectorAll('.aliasVal')[i];
+    if(k.value.trim()&&v?.value?.trim()) aliases[k.value.trim()]=v.value.trim();
+  });
+  const r=await (await fetch('/api/rules',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({system_prompt:sysPrompt,aliases,scope})})).json();
+  if(r.ok) toast('Rules saved');
+  else toast('Error: '+(r.error||'failed'));
+  // Also save scope to scope.txt
+  if(scope.length) await fetch('/api/scope',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope})});
+}
+
+function exportRules(){
+  const sysPrompt=(document.getElementById('rulesSystemPrompt')||{}).value||'';
+  const scope=((document.getElementById('rulesScope')||{}).value||'').split('\n').map(l=>l.trim()).filter(Boolean);
+  const aliases={};
+  document.querySelectorAll('.aliasKey').forEach((k,i)=>{
+    const v=document.querySelectorAll('.aliasVal')[i];
+    if(k.value.trim()&&v?.value?.trim()) aliases[k.value.trim()]=v.value.trim();
+  });
+  const a=document.createElement('a');
+  a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify({system_prompt:sysPrompt,aliases,scope},null,2));
+  a.download='nexus-rules-profile-'+Date.now()+'.json'; a.click();
+}
+
+function importRules(inp){
+  const f=inp.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=async e=>{
+    try {
+      const rules=JSON.parse(e.target.result);
+      const r=await (await fetch('/api/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(rules)})).json();
+      if(r.ok){ toast('Profile imported'); loadRules(); }
+      else toast('Error: '+(r.error||'failed'));
+    } catch(ex){ toast('Invalid JSON: '+ex.message); }
+  };
+  rd.readAsText(f);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LIVE SESSIONS — Collaborative session sharing
+   ══════════════════════════════════════════════════════════════════ */
+async function loadSessions(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  wrap.innerHTML=`<div class="card"><div class="spinner"></div> Loading sessions…</div>`;
+  let data={sessions:[]};
+  try { data=await (await fetch('/api/sessions')).json(); } catch(e){}
+  const sessions=data.sessions||[];
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 6px">🔗 Live Sessions</h3>
+    <p style="color:var(--text2);font-size:13px;margin:0 0 12px">
+      Share your session with other authorised testers. All outputs sync in real-time via WebSocket.
+      Session links expire in 60 minutes.
+    </p>
+    <button class="btn" onclick="createSession()">＋ New Session Link</button>
+  </div>
+  <div id="sessionNew" style="display:none" class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 8px">New Session</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <input id="sessRole" placeholder="Your role (e.g. recon, exploit, reporting)"
+        style="flex:1;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+      <input id="sessNote" placeholder="Session note (optional)"
+        style="flex:2;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+    </div>
+    <button class="btn" onclick="submitNewSession()">Create link</button>
+    <button class="btn sec" onclick="document.getElementById('sessionNew').style.display='none'">Cancel</button>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 10px">Active Sessions (${sessions.length})</h3>
+    ${!sessions.length?`<p style="color:var(--muted);font-size:14px;text-align:center;padding:20px">No active sessions.</p>`:''}
+    ${sessions.map(s=>`
+    <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:16px">🔗</span>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">${esc(s.id?.slice(0,12))}…</div>
+          <div style="font-size:12px;color:var(--muted)">${esc(s.role||'owner')} · ${esc(s.note||'')} · ${new Date((s.created||0)*1000).toLocaleTimeString()}</div>
+        </div>
+        <span class="tag on">${esc(s.status||'active')}</span>
+        <button class="btn sec" style="padding:6px 10px;font-size:12px" onclick="copyText('${location.origin}/nexus/join/${esc(s.id)}')">Copy link</button>
+        <button class="btn sec" style="padding:6px 10px;font-size:12px;color:var(--error)" onclick="revokeSession('${esc(s.id)}')">Revoke</button>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function createSession(){ document.getElementById('sessionNew').style.display='block'; }
+async function submitNewSession(){
+  const role=(document.getElementById('sessRole')||{}).value||'owner';
+  const note=(document.getElementById('sessNote')||{}).value||'';
+  const r=await (await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role,note})})).json();
+  if(r.ok){ toast('Session created'); copyText(location.origin+'/nexus/join/'+r.session_id); loadSessions(); }
+  else toast('Error: '+(r.error||'failed'));
+}
+async function revokeSession(id){
+  if(!confirm('Revoke session '+id+'?')) return;
+  const r=await (await fetch('/api/sessions/'+id,{method:'DELETE'})).json();
+  if(r.ok){ toast('Session revoked'); loadSessions(); }
+  else toast('Error: '+(r.error||'failed'));
 }
 
 /* ──────────────────────────────────────────────────────────────────
