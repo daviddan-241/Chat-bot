@@ -203,6 +203,22 @@ def run_workflow(target: str, session_id: str | None = None) -> Generator[dict, 
             phase_results.append(res)
             yield {"type": "cmd_result", "phase": phase["id"], "cmd": cmd,
                    "output": res["output"], "ok": res["ok"]}
+            # ── Auto-ingest scan output into topology mapper ──────────────────
+            if res["output"]:
+                try:
+                    from modules.topology_mapper import parse_nmap, parse_generic, _graph_slim, get_or_create
+                    is_nmap = "nmap" in cmd
+                    if is_nmap:
+                        graph = parse_nmap(target, res["output"])
+                    elif any(t in cmd for t in ["ping", "dig", "whois", "curl -sI", "openssl"]):
+                        graph = parse_generic(target, cmd.split()[0], res["output"])
+                    else:
+                        graph = None
+                    if graph:
+                        yield {"type": "topology_update", "phase": phase["id"],
+                               "target": target, "graph": graph}
+                except Exception:
+                    pass   # Topology is best-effort — never block the workflow
             time.sleep(0.5)   # Rate limit between commands
 
         all_results.append({**phase, "results": phase_results})
