@@ -1,6 +1,103 @@
 version: '3.9'
 
+# ═══════════════════════════════════════════════════════
+#  NEXUS Full Stack — docker-compose.yml
+#  Services:
+#    nexus      — Main AI OS (Flask/Gunicorn)
+#    postgres   — Primary storage
+#    redis      — Cache + job queue
+#    ollama     — Local LLM server (Qwen/DeepSeek/Llama)
+#    open-webui — Alternative Ollama chat UI
+#    tor        — Anonymous proxy sidecar
+# ═══════════════════════════════════════════════════════
+
 services:
+
+  # ── PostgreSQL ───────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       nexus
+      POSTGRES_USER:     nexus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus_secret_change_me}
+    volumes:
+      - nexus_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - nexus_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Ollama (local LLM) ───────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nexus-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - nexus_ollama:/root/.ollama
+    environment:
+      OLLAMA_HOST:        0.0.0.0
+      OLLAMA_KEEP_ALIVE:  "24h"
+      OLLAMA_NUM_PARALLEL: "2"
+    # GPU support — uncomment if NVIDIA GPU available:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ── Open WebUI ───────────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: nexus-open-webui
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    ports:
+      - "3000:8080"
+    environment:
+      OLLAMA_BASE_URL:          http://ollama:11434
+      WEBUI_SECRET_KEY:         ${WEBUI_SECRET_KEY:-change-me-in-production}
+      ENABLE_SIGNUP:            "true"
+      DEFAULT_MODELS:           "qwen2.5:7b"
+      WEBUI_NAME:               "NEXUS AI"
+      ENABLE_COMMUNITY_SHARING: "false"
+    volumes:
+      - nexus_webui:/app/backend/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ── Tor anonymous proxy ──────────────────────────────
   tor:
     image: dperson/torproxy:latest
     container_name: nexus-tor
@@ -9,31 +106,44 @@ services:
       - "9050:9050"
       - "9051:9051"
     environment:
-      - TOR_MaxCircuitDirtiness=600
+      TOR_MaxCircuitDirtiness: "300"
 
+  # ── NEXUS Main App ───────────────────────────────────
   nexus:
     build: .
     image: nexus-ai-chat:latest
     container_name: nexus
     restart: unless-stopped
     depends_on:
-      - tor
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     ports:
       - "5000:5000"
     environment:
-      - PORT=5000
-      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN}
-      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-nexus@agent.ai}
-      - GIT_USER_NAME=${GIT_USER_NAME:-NEXUS Agent}
-      - TOR_ENABLED=${TOR_ENABLED:-0}
-      - TOR_PROXY=socks5h://tor:9050
-      - MODULE_RELOAD_INTERVAL=3600
-      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-changeme-in-production}
+      PORT:                       5000
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_PERSONAL_ACCESS_TOKEN}
+      GIT_USER_EMAIL:             ${GIT_USER_EMAIL:-nexus@agent.ai}
+      GIT_USER_NAME:              ${GIT_USER_NAME:-NEXUS Agent}
+      # Database
+      DATABASE_URL:               postgresql://nexus:${POSTGRES_PASSWORD:-nexus_secret_change_me}@postgres:5432/nexus
+      REDIS_URL:                  redis://redis:6379/0
+      # Ollama
+      OLLAMA_HOST:                http://ollama:11434
+      OLLAMA_MODEL:               qwen2.5:7b
+      # Tor
+      TOR_ENABLED:                ${TOR_ENABLED:-0}
+      TOR_PROXY:                  socks5h://tor:9050
+      # Security
+      FLASK_SECRET_KEY:           ${FLASK_SECRET_KEY:-change-me-in-production}
+      MODULE_RELOAD_INTERVAL:     "3600"
     volumes:
       - nexus_uploads:/app/multi_agent_system/uploads
       - nexus_workspace:/app/multi_agent_system/workspace
       - nexus_modules:/app/multi_agent_system/modules
-      - nexus_wallets:/app/multi_agent_system/nexus_wallets.json
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -42,7 +152,10 @@ services:
       start_period: 20s
 
 volumes:
+  nexus_postgres:
+  nexus_redis:
+  nexus_ollama:
+  nexus_webui:
   nexus_uploads:
   nexus_workspace:
   nexus_modules:
-  nexus_wallets:
