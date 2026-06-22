@@ -102,6 +102,18 @@ def _send_push_notification(title: str, body: str, url: str = '/'):
 
 _load_push_state()
 
+# ── MODULE AUTO-LOADER ──
+try:
+    from module_loader import start_background_watcher as _start_module_watcher, \
+        get_extra_tools as _get_extra_tools, get_module_list as _get_module_list, \
+        reload_all as _reload_modules
+    _start_module_watcher()
+except Exception as _ml_err:
+    print(f'[NEXUS] ModuleLoader init error: {_ml_err}')
+    _get_extra_tools = lambda: {}
+    _get_module_list  = lambda: []
+    _reload_modules   = lambda: {}
+
 # ── TASK PERSISTENCE DIRECTORY ──
 # Stored inside the app directory so it survives Gunicorn restarts (not /tmp which is ephemeral)
 _TASK_STORE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'task_store')
@@ -1477,11 +1489,170 @@ def test_provider(name):
         return jsonify({"ok": False, "provider": name, "model": model, "error": err[:300]})
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CRYPTO WALLET API  — Monero (XMR) + Litecoin (LTC)
+# All endpoints are free — no API keys required for address gen or balance
+# ══════════════════════════════════════════════════════════════════════════════
+try:
+    import crypto_wallet as _CW
+    _CRYPTO_OK = True
+except Exception as _ce:
+    _CRYPTO_OK = False
+    print(f"[NEXUS] Crypto wallet not loaded: {_ce}")
+
+
+def _cw():
+    if not _CRYPTO_OK:
+        return None, jsonify({"ok": False, "error": "Crypto wallet module not available"}), 503
+    return _CW, None, None
+
+
+@app.route('/api/wallet/list')
+def wallet_list():
+    cw, err, code = _cw()
+    if err: return err, code
+    return jsonify(cw.wallet_list())
+
+
+@app.route('/api/wallet/new/<coin>', methods=['POST'])
+def wallet_new(coin):
+    cw, err, code = _cw()
+    if err: return err, code
+    body = request.get_json(force=True) or {}
+    label = body.get('label', 'default')
+    coin = coin.lower()
+    if coin == 'ltc':
+        return jsonify(cw.ltc_new_wallet(label))
+    elif coin == 'xmr':
+        return jsonify(cw.xmr_new_wallet(label))
+    return jsonify({'ok': False, 'error': f'Unknown coin: {coin}'}), 400
+
+
+@app.route('/api/wallet/<coin>/balance/<path:address>')
+def wallet_balance(coin, address):
+    cw, err, code = _cw()
+    if err: return err, code
+    vk = request.args.get('view_key', '')
+    coin = coin.lower()
+    if coin == 'ltc':
+        return jsonify(cw.ltc_balance(address))
+    elif coin == 'xmr':
+        return jsonify(cw.xmr_balance(address, vk or None))
+    return jsonify({'ok': False, 'error': f'Unknown coin: {coin}'}), 400
+
+
+@app.route('/api/wallet/<coin>/send', methods=['POST'])
+def wallet_send(coin):
+    cw, err, code = _cw()
+    if err: return err, code
+    body = request.get_json(force=True) or {}
+    coin = coin.lower()
+    from_addr = body.get('from', '')
+    to_addr = body.get('to', '')
+    amount = float(body.get('amount', 0) or 0)
+    if not from_addr or not to_addr or not amount:
+        return jsonify({'ok': False, 'error': 'Missing from/to/amount'}), 400
+    if coin == 'ltc':
+        return jsonify(cw.ltc_send(from_addr, to_addr, amount, body.get('wif')))
+    elif coin == 'xmr':
+        return jsonify(cw.xmr_send(from_addr, to_addr, amount))
+    return jsonify({'ok': False, 'error': f'Unknown coin: {coin}'}), 400
+
+
+@app.route('/api/wallet/<coin>/get/<path:address>')
+def wallet_get(coin, address):
+    cw, err, code = _cw()
+    if err: return err, code
+    return jsonify(cw.wallet_get(coin.lower(), address))
+
+
+@app.route('/api/wallet/<coin>/delete/<path:address>', methods=['DELETE'])
+def wallet_delete(coin, address):
+    cw, err, code = _cw()
+    if err: return err, code
+    return jsonify(cw.wallet_delete(coin.lower(), address))
+
+
+@app.route('/api/wallet/command', methods=['POST'])
+def wallet_command():
+    """AI-friendly dispatcher: POST {cmd, ...args} → wallet action."""
+    cw, err, code = _cw()
+    if err: return err, code
+    body = request.get_json(force=True) or {}
+    cmd = body.pop('cmd', '')
+    return jsonify(cw.handle_command(cmd, body))
+
+
 @app.route('/health')
 @app.route('/healthz')
 @app.route('/ping')
 def health():
     return jsonify({'status':'ok','service':'nexus','ts':int(time.time())}), 200
+
+
+# ── MODULE AUTO-LOADER ENDPOINTS ─────────────────────────────────────────────
+@app.route('/api/modules')
+def api_modules_list():
+    """List all auto-loaded modules and their exported tools."""
+    try:
+        mods = _get_module_list()
+        tools = list(_get_extra_tools().keys())
+        return jsonify({'ok': True, 'modules': mods, 'tools': tools, 'count': len(mods)})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/modules/reload', methods=['POST'])
+def api_modules_reload():
+    """Trigger an immediate module reload scan."""
+    try:
+        result = _reload_modules()
+        return jsonify({'ok': True, **result})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# ── AUTO-SKILL LEARNING FROM UPLOAD ──────────────────────────────────────────
+@app.route('/api/skills/auto-learn', methods=['POST'])
+def api_skills_auto_learn():
+    """
+    Accept a text/file payload and auto-extract skills into the skills library.
+    POST JSON: {content: str, source: str (optional), tags: [str] (optional)}
+    """
+    body = request.get_json(force=True) or {}
+    content = body.get('content','').strip()
+    source  = body.get('source','auto-learn')
+    tags    = body.get('tags', [])
+    if not content:
+        return jsonify({'ok': False, 'error': 'No content provided'}), 400
+    try:
+        # Store as a skill in the orchestrator skills system
+        from orchestrator.api import _get_skill_store
+        store = _get_skill_store()
+        skill_id = f"auto_{int(time.time())}_{secrets.token_hex(4)}"
+        # Extract title from first line
+        title = content.split('\n')[0][:80].strip('#: ') or source
+        skill = {
+            'id': skill_id,
+            'title': title,
+            'content': content,
+            'source': source,
+            'tags': tags,
+            'created': time.time(),
+            'auto_learned': True,
+        }
+        store.save(skill)
+        return jsonify({'ok': True, 'skill_id': skill_id, 'title': title})
+    except Exception as e:
+        # Fallback: save to a local auto-skills file
+        try:
+            skill_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auto_skills')
+            os.makedirs(skill_dir, exist_ok=True)
+            fname = f"skill_{int(time.time())}_{secrets.token_hex(4)}.md"
+            with open(os.path.join(skill_dir, fname), 'w') as f:
+                f.write(f"# {source}\n\n{content}")
+            return jsonify({'ok': True, 'skill_id': fname, 'title': source, 'note': 'saved locally'})
+        except Exception as e2:
+            return jsonify({'ok': False, 'error': str(e2)}), 500
 
 
 if __name__ == '__main__':
