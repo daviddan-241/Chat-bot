@@ -18,6 +18,9 @@ const NAV = [
   {id:'workflow',  ico:'⚡', label:'Auto Workflow'},
   {id:'testplans', ico:'🗂️', label:'Test Plans'},
   {id:'analysis',  ico:'🔬', label:'File Analysis'},
+  {id:'edr',       ico:'🛡️', label:'EDR Validator'},
+  {sec:'Privacy'},
+  {id:'torctl',    ico:'🧅', label:'Tor Manager'},
   {sec:'Platform'},
   {id:'wallet',    ico:'💰', label:'Crypto Wallet'},
   {id:'connectors',ico:'🔌', label:'Connectors'},
@@ -26,6 +29,8 @@ const NAV = [
   {sec:'System'},
   {id:'rules',     ico:'📋', label:'Rules Editor'},
   {id:'sessions',  ico:'🔗', label:'Live Sessions'},
+  {id:'jobs',      ico:'⏱️', label:'Job Queue'},
+  {id:'secdelete', ico:'🔒', label:'Secure Delete'},
   {id:'settings',  ico:'⚙️', label:'Settings'},
 ];
 
@@ -75,6 +80,10 @@ function go(id){
     else if(id==='testplans')  { document.getElementById('view-generic').classList.add('active'); loadTestPlans(); }
     else if(id==='models')     { document.getElementById('view-generic').classList.add('active'); loadModels(); }
     else if(id==='workflow')   { document.getElementById('view-generic').classList.add('active'); loadWorkflow(); }
+    else if(id==='edr')        { document.getElementById('view-generic').classList.add('active'); loadEdr(); }
+    else if(id==='torctl')     { document.getElementById('view-generic').classList.add('active'); loadTorManager(); }
+    else if(id==='jobs')       { document.getElementById('view-generic').classList.add('active'); loadJobs(); }
+    else if(id==='secdelete')  { document.getElementById('view-generic').classList.add('active'); loadSecureDelete(); }
     else if(id==='analysis')   { document.getElementById('view-generic').classList.add('active'); loadAnalysis(); }
     else if(id==='rules')      { document.getElementById('view-generic').classList.add('active'); loadRules(); }
     else if(id==='sessions')   { document.getElementById('view-generic').classList.add('active'); loadSessions(); }
@@ -1939,6 +1948,376 @@ async function revokeSession(id){
   const r=await (await fetch('/api/sessions/'+id,{method:'DELETE'})).json();
   if(r.ok){ toast('Session revoked'); loadSessions(); }
   else toast('Error: '+(r.error||'failed'));
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   EDR VALIDATOR — Generate safe telemetry to validate your detection stack
+   ══════════════════════════════════════════════════════════════════ */
+const EDR_TESTS=[
+  {id:'process',     label:'Process Telemetry',   icon:'🔄', desc:'Spawn child processes (sh→python→perl). EDR should log ancestry chains.'},
+  {id:'network',     label:'Network Telemetry',   icon:'🌐', desc:'DNS, ICMP, HTTP to public endpoints. SIEM should capture traffic.'},
+  {id:'file',        label:'File Telemetry',       icon:'📁', desc:'Create/exec/delete script in /tmp. Watched by most EDR sensors.'},
+  {id:'obfuscation', label:'Command Obfuscation',  icon:'🔏', desc:'Execute base64-encoded command. Validates SIEM decoder rule.'},
+  {id:'memory',      label:'Memory Telemetry',     icon:'💾', desc:'memfd_create (Linux). Fileless execution pattern for kernel telemetry.'},
+  {id:'jitter',      label:'Jitter Simulation',    icon:'📡', desc:'Randomised delays + UA spoofing. Validates beaconing detection.'},
+];
+
+async function loadEdr(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 6px">🛡️ EDR Detection Validator</h3>
+    <p style="color:var(--text2);font-size:13px;margin:0 0 10px">
+      Generate <b>safe, benign telemetry events</b> and verify your EDR/SIEM fires the expected alerts.
+      All payloads print harmless output — nothing destructive, no persistence.
+    </p>
+    <div style="background:#EFF7FF;border:1px solid #2196F3;border-radius:10px;padding:10px;font-size:12px;color:#1565C0;margin-bottom:12px">
+      ℹ️ Run these on your own authorised lab system. Check EDR console for alert coverage after each test.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn" onclick="edrRunAll()">▶ Run All Tests</button>
+      <button class="btn sec" onclick="edrClear()">Clear Output</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px">
+      ${EDR_TESTS.map(t=>`
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--bg2)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:20px">${t.icon}</span>
+          <b style="font-size:13px">${t.label}</b>
+          <span id="edrst-${t.id}" style="margin-left:auto;font-size:11px;color:var(--muted)">idle</span>
+        </div>
+        <p style="font-size:12px;color:var(--text2);margin:0 0 8px">${t.desc}</p>
+        <button class="btn sec" style="width:100%;padding:7px;font-size:12px"
+          onclick="edrRunTest('${t.id}','${esc(t.label)}')">Run</button>
+      </div>`).join('')}
+    </div>
+  </div>
+  <div class="card" id="edrOutput" style="display:none">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <h3 style="margin:0;flex:1">Test Output</h3>
+      <button class="btn sec" onclick="downloadEdrLog()">⬇ Download Report</button>
+    </div>
+    <div id="edrStream" style="background:#0D0D0F;color:#C8F5C0;border-radius:12px;padding:14px;font-family:ui-monospace,monospace;font-size:12px;max-height:500px;overflow-y:auto;white-space:pre-wrap"></div>
+  </div>`;
+}
+
+let _edrLog='';
+function edrClear(){ _edrLog=''; document.getElementById('edrOutput')&&(document.getElementById('edrOutput').style.display='none'); }
+function edrAppend(txt){
+  const out=document.getElementById('edrOutput');
+  const stream=document.getElementById('edrStream');
+  if(!out||!stream) return;
+  out.style.display='block';
+  _edrLog+=txt+'\n';
+  stream.textContent=_edrLog;
+  stream.scrollTop=stream.scrollHeight;
+}
+
+async function edrRunTest(id, label){
+  document.getElementById('edrst-'+id).textContent='running…';
+  edrAppend(`\n${'─'.repeat(48)}\n▶ ${label}\n`);
+  try {
+    const r=await (await fetch('/api/edr/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({test:id})})).json();
+    if(!r.ok){ edrAppend('Error: '+(r.error||'failed')); document.getElementById('edrst-'+id).textContent='error'; return; }
+    edrAppend(formatEdrResult(r));
+    document.getElementById('edrst-'+id).textContent=r.detect_expected?'✅ done':'done';
+  } catch(e){ edrAppend('Error: '+esc(e.message)); document.getElementById('edrst-'+id).textContent='error'; }
+}
+
+async function edrRunAll(){
+  edrClear();
+  edrAppend('NEXUS EDR Validation Session — '+new Date().toISOString()+'\n');
+  for(const t of EDR_TESTS){
+    await edrRunTest(t.id, t.label);
+    await new Promise(r=>setTimeout(r,500));
+  }
+  edrAppend('\n'+'═'.repeat(48)+'\nSession complete. Check your EDR/SIEM for alert coverage.\n');
+}
+
+function formatEdrResult(r){
+  let out='';
+  (r.results||[]).forEach(res=>{
+    if(res.cmd) out+=`  $ ${res.cmd}\n`;
+    if(res.action) out+=`  [${res.action}] ${res.path||''}\n`;
+    if(res.output) out+=`  ${res.output.replace(/\n/g,'\n  ')}\n`;
+    if(res.error) out+=`  ⚠ ${res.error}\n`;
+  });
+  if(r.encoded_payload) out+=`  Encoded: ${r.encoded_payload}\n  Decoded: ${r.decoded_payload}\n`;
+  if(r.note) out+=`  ℹ ${r.note}\n`;
+  return out||'  (no output)\n';
+}
+
+function downloadEdrLog(){
+  const a=document.createElement('a');
+  a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(_edrLog);
+  a.download='nexus-edr-validation-'+Date.now()+'.txt'; a.click();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TOR MANAGER — Circuit rotation + DoH DNS privacy
+   ══════════════════════════════════════════════════════════════════ */
+async function loadTorManager(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  wrap.innerHTML=`<div class="card"><div class="spinner"></div> Checking Tor status…</div>`;
+  let status={ok:false};
+  try { status=await (await fetch('/api/tor/status')).json(); } catch(e){}
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1"><h3 style="margin:0 0 4px">🧅 Tor Circuit Manager</h3>
+        <p style="color:var(--text2);font-size:13px;margin:0">Rotate circuits, verify exit IP, and resolve DNS over HTTPS for full privacy.</p>
+      </div>
+      <span class="tag ${status.ok?'on':'off'}" style="font-size:13px;padding:6px 14px">
+        ${status.ok?'✅ Tor connected':'❌ Tor offline'}
+      </span>
+    </div>
+    ${status.ok?`
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:12px">
+      <div style="background:var(--bg2);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:var(--muted)">CIRCUITS</div>
+        <div style="font-size:22px;font-weight:700">${status.circuits||0}</div>
+      </div>
+      <div style="background:var(--bg2);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:var(--muted)">ROTATIONS</div>
+        <div style="font-size:22px;font-weight:700">${status.circuit_count||0}</div>
+      </div>
+      <div style="background:var(--bg2);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:var(--muted)">AUTO-ROTATE</div>
+        <div style="font-size:22px;font-weight:700">${Math.round((status.rotate_interval||300)/60)}m</div>
+      </div>
+      <div style="background:var(--bg2);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:var(--muted)">VERSION</div>
+        <div style="font-size:16px;font-weight:600">${status.version||'?'}</div>
+      </div>
+    </div>`:''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="btn" onclick="torRotate()">🔄 New Circuit</button>
+      <button class="btn sec" onclick="torCheckIP()">🌐 Check Exit IP</button>
+      <button class="btn sec" onclick="torStartRotate()">⏱ Auto-Rotate</button>
+      <button class="btn sec" onclick="torStopRotate()">■ Stop Rotate</button>
+    </div>
+    <div id="torMsg" style="margin-top:10px;font-size:13px;color:var(--text2)"></div>
+  </div>
+
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 10px">🔒 DoH — DNS over HTTPS</h3>
+    <p style="color:var(--text2);font-size:13px;margin:0 0 10px">
+      Resolve domains via encrypted HTTPS — no plaintext DNS leakage.
+      Routed via Cloudflare (1.1.1.1) or Quad9.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <input id="dohDomain" placeholder="domain.com" value="example.com"
+        style="flex:2;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+      <select id="dohType" style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+        <option>A</option><option>AAAA</option><option>MX</option><option>TXT</option><option>CNAME</option><option>NS</option>
+      </select>
+      <select id="dohResolver" style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+        <option value="cloudflare">Cloudflare 1.1.1.1</option>
+        <option value="quad9">Quad9 9.9.9.9</option>
+        <option value="google">Google 8.8.8.8</option>
+      </select>
+      <button class="btn" onclick="dohLookup()">Resolve</button>
+    </div>
+    <div id="dohResult" style="font-size:13px;color:var(--text2)"></div>
+  </div>`;
+}
+
+async function torRotate(){
+  document.getElementById('torMsg').innerHTML='<span class="spinner"></span> Requesting new circuit…';
+  const r=await (await fetch('/api/tor/new-circuit',{method:'POST'})).json();
+  document.getElementById('torMsg').innerHTML = r.ok
+    ? `✅ New circuit acquired — rotation #${r.circuit}`
+    : `❌ ${r.response||r.error||'Failed'}`;
+}
+async function torCheckIP(){
+  document.getElementById('torMsg').innerHTML='<span class="spinner"></span> Checking exit IP…';
+  const r=await (await fetch('/api/tor/exit-ip')).json();
+  document.getElementById('torMsg').innerHTML= r.ok
+    ? `🌍 Exit IP: <b>${esc(r.exit_ip)}</b> — ${esc(r.country||'?')} (via ${r.via})`
+    : `❌ ${r.error}`;
+}
+async function torStartRotate(){
+  const r=await (await fetch('/api/tor/start-rotate',{method:'POST'})).json();
+  document.getElementById('torMsg').textContent=r.ok?`✅ Auto-rotate: every ${r.interval_s}s`:'❌ '+r.error;
+}
+async function torStopRotate(){
+  const r=await (await fetch('/api/tor/stop-rotate',{method:'POST'})).json();
+  document.getElementById('torMsg').textContent=r.ok?'✅ Auto-rotate stopped':'❌ '+r.error;
+}
+async function dohLookup(){
+  const domain=(document.getElementById('dohDomain')||{}).value?.trim();
+  const qtype=(document.getElementById('dohType')||{}).value||'A';
+  const resolver=(document.getElementById('dohResolver')||{}).value||'cloudflare';
+  if(!domain){ toast('Enter a domain'); return; }
+  document.getElementById('dohResult').innerHTML='<span class="spinner"></span> Resolving…';
+  const r=await (await fetch('/api/tor/doh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain,type:qtype,resolver})})).json();
+  document.getElementById('dohResult').innerHTML= r.ok
+    ? `<b>${esc(domain)}</b> ${qtype} → <code style="color:var(--accent)">${r.answers?.join(', ')||'(empty)'}</code> via ${esc(r.resolver)}`
+    : `❌ ${esc(r.error)}`;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   JOB QUEUE — Background jobs + offline command queue
+   ══════════════════════════════════════════════════════════════════ */
+async function loadJobs(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  let jobs=[], offline=[];
+  try { const r=await (await fetch('/api/jobs')).json(); jobs=r.jobs||[]; } catch(e){}
+  try { const r=await (await fetch('/api/jobs/offline')).json(); offline=r.queue||[]; } catch(e){}
+  const STATUS_COLORS={pending:'var(--muted)',running:'var(--accent)',done:'var(--success)',failed:'var(--error)',cancelled:'var(--muted)'};
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 6px">⏱️ Job Queue</h3>
+    <p style="color:var(--text2);font-size:13px;margin:0 0 10px">
+      Background jobs continue running while you switch views.
+      Offline-queued commands execute automatically on reconnect.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <input id="jobCmd" placeholder="shell command to run in background…"
+        style="flex:1;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px"
+        onkeydown="if(event.key==='Enter') submitJob()">
+      <button class="btn" onclick="submitJob()">▶ Submit</button>
+      <button class="btn sec" onclick="loadJobs()">⟳ Refresh</button>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 10px">Active Jobs (${jobs.length})</h3>
+    ${!jobs.length?'<p style="color:var(--muted);font-size:14px;text-align:center;padding:16px">No jobs queued.</p>':''}
+    ${jobs.map(j=>`
+    <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:13px">${esc(j.name||j.id?.slice(0,12))}</div>
+          <div style="font-size:11px;color:var(--muted)">${j.id} · ${j.status}</div>
+        </div>
+        <span style="font-size:12px;color:${STATUS_COLORS[j.status]||'var(--muted)'};font-weight:600">● ${j.status}</span>
+        ${j.status==='running'||j.status==='pending'?`<button class="btn sec" style="padding:5px 10px;font-size:11px;color:var(--error)"
+          onclick="cancelJob('${j.id}')">Cancel</button>`:''}
+      </div>
+      ${j.error?`<div style="font-size:12px;color:var(--error);margin-top:6px">⚠ ${esc(j.error)}</div>`:''}
+    </div>`).join('')}
+  </div>
+  ${offline.length?`
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <h3 style="margin:0;flex:1">📤 Offline Queue (${offline.length})</h3>
+      <button class="btn sec" onclick="flushOfflineQueue()">▶ Execute All</button>
+    </div>
+    ${offline.map(q=>`
+    <div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:6px;font-size:13px">
+      <code>${esc(q.command)}</code>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">${new Date(q.queued*1000).toLocaleTimeString()}</div>
+    </div>`).join('')}
+  </div>`:''}`;
+}
+
+async function submitJob(){
+  const cmd=(document.getElementById('jobCmd')||{}).value?.trim();
+  if(!cmd){ toast('Enter a command'); return; }
+  const r=await (await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:cmd.slice(0,40),cmd})})).json();
+  if(r.ok){ toast('Job queued: '+r.job_id?.slice(0,8)); document.getElementById('jobCmd').value=''; loadJobs(); }
+  else toast('Error: '+(r.error||'failed'));
+}
+
+async function cancelJob(id){
+  await fetch('/api/jobs/'+id,{method:'DELETE'});
+  toast('Job cancelled'); loadJobs();
+}
+
+async function flushOfflineQueue(){
+  const r=await (await fetch('/api/jobs/offline/flush',{method:'POST'})).json();
+  toast(`Executed ${r.results?.length||0} offline commands`); loadJobs();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SECURE DELETE — GDPR/HIPAA-compliant multi-pass file wipe
+   ══════════════════════════════════════════════════════════════════ */
+async function loadSecureDelete(){
+  const g=document.getElementById('view-generic'); g.classList.add('active');
+  const wrap=g.querySelector('.wrap');
+  wrap.innerHTML=`
+  <div class="card" style="margin-bottom:10px">
+    <h3 style="margin:0 0 6px">🔒 Secure File Deletion</h3>
+    <p style="color:var(--text2);font-size:13px;margin:0 0 10px">
+      NIST 800-88 / DoD 5220.22-M compliant overwrite (random → complement → random → zeros).
+      Generates a GDPR Article 17 / HIPAA disposal report for audit trail.
+    </p>
+    <div style="background:#FFF0F0;border:1px solid var(--error);border-radius:10px;padding:10px;font-size:12px;color:#B71C1C;margin-bottom:12px">
+      ⚠️ <b>Irreversible.</b> Securely deleted files cannot be recovered. Double-check paths before confirming.
+    </div>
+
+    <div style="margin-bottom:14px">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">File/Directory Paths (one per line)</label>
+      <textarea id="sdPaths" rows="5"
+        style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-family:ui-monospace,monospace;font-size:13px;resize:vertical"
+        placeholder="/tmp/sensitive-data.txt&#10;/tmp/old-exports/&#10;/home/user/secret.zip"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <label style="font-size:13px">Passes:</label>
+      <select id="sdPasses" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px">
+        <option value="1">1 pass (fast)</option>
+        <option value="3" selected>3 passes (DoD 5220.22-M)</option>
+        <option value="7">7 passes (Gutmann lite)</option>
+      </select>
+      <label style="font-size:13px">
+        <input type="checkbox" id="sdReport" checked style="margin-right:5px">
+        Generate disposal report
+      </label>
+      <label style="font-size:13px">
+        <input type="checkbox" id="sdTemp">
+        Also wipe /tmp/nexus_* temp files
+      </label>
+    </div>
+    <button class="btn" style="background:#DC2626" onclick="runSecureDelete()">🗑 Securely Delete</button>
+    <div id="sdOutput" style="margin-top:14px"></div>
+  </div>`;
+}
+
+async function runSecureDelete(){
+  const pathsRaw=(document.getElementById('sdPaths')||{}).value||'';
+  const paths=pathsRaw.split('\n').map(l=>l.trim()).filter(Boolean);
+  const passes=parseInt((document.getElementById('sdPasses')||{}).value)||3;
+  const report=(document.getElementById('sdReport')||{}).checked;
+  const wipeTemp=(document.getElementById('sdTemp')||{}).checked;
+  if(!paths.length&&!wipeTemp){ toast('Enter at least one path'); return; }
+  if(!confirm(`Securely delete ${paths.length} path(s) with ${passes} passes?\nThis is IRREVERSIBLE.`)) return;
+  const out=document.getElementById('sdOutput');
+  out.innerHTML='<div class="spinner"></div> Wiping…';
+  const body={paths,passes,report,wipe_temp:wipeTemp};
+  try {
+    const r=await (await fetch('/api/secure-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!r.ok){ out.innerHTML=`<span style="color:var(--error)">Error: ${esc(r.error||'failed')}</span>`; return; }
+    const results=r.results||[];
+    const ok=results.filter(x=>x.ok), fail=results.filter(x=>!x.ok);
+    out.innerHTML=`
+    <div style="border:1px solid var(--border);border-radius:12px;padding:12px">
+      <div style="display:flex;gap:16px;margin-bottom:10px">
+        <div><span style="color:var(--success);font-size:22px;font-weight:700">${ok.length}</span><br><span style="font-size:11px;color:var(--muted)">wiped</span></div>
+        ${fail.length?`<div><span style="color:var(--error);font-size:22px;font-weight:700">${fail.length}</span><br><span style="font-size:11px;color:var(--muted)">failed</span></div>`:''}
+        <div><span style="font-size:22px;font-weight:700">${r.total_hr||'?'}</span><br><span style="font-size:11px;color:var(--muted)">total wiped</span></div>
+      </div>
+      ${results.map(x=>`
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:5px">
+        <span>${x.ok?'✅':'❌'}</span>
+        <code style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(x.path||'')}</code>
+        ${x.size_hr?`<span style="color:var(--muted);font-size:11px">${x.size_hr}</span>`:''}
+        ${x.duration_ms?`<span style="color:var(--muted);font-size:11px">${x.duration_ms}ms</span>`:''}
+        ${x.error?`<span style="color:var(--error);font-size:11px">${esc(x.error)}</span>`:''}
+      </div>`).join('')}
+      ${r.report?`<div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn sec" onclick='downloadSdReport(${JSON.stringify(JSON.stringify(r.report))})'>⬇ Download Report</button>
+      </div>`:''}
+    </div>`;
+  } catch(e){ out.innerHTML=`<span style="color:var(--error)">Error: ${esc(e.message)}</span>`; }
+}
+
+function downloadSdReport(reportJson){
+  const a=document.createElement('a');
+  a.href='data:application/json;charset=utf-8,'+encodeURIComponent(reportJson);
+  a.download='nexus-disposal-report-'+Date.now()+'.json'; a.click();
 }
 
 /* ──────────────────────────────────────────────────────────────────
